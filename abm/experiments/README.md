@@ -4,6 +4,13 @@ ABM experiment definitions, run configs, and results for the Guided vs.
 Unguided comparison (and any later experiments). See
 [abm_data_generator.md](../abm_data_generator.md).
 
+## Contents
+
+- [`guided-vs-unguided/definition.md`](guided-vs-unguided/definition.md) —
+  the first experiment: `experiment_id`, journey/condition vocabulary,
+  the 5 `agent_parameters` and their sampling distribution, population
+  size, execution config. Draft, not yet run.
+
 ## Design decisions settled so far (durable — see [AGENTS.md](../../AGENTS.md) for the full log; implementation-level specifics against Matriz live in private notes, not here — see AGENTS.md's confidentiality rule)
 
 - The decision policy that drives each agent is an explicit, auditable

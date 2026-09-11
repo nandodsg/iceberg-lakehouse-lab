@@ -41,6 +41,21 @@ one that wrote this rule.
   place — physical separation, not a git config.
 - Before any commit, actually look at the diff for exactly this — don't
   assume a past pass caught everything.
+- **Content documents (contracts, experiment definitions, docs/, code —
+  anything that isn't this file or the root READMEs) must never name or
+  link the private-notes repo, or use its internal planning vocabulary
+  ("épico", "Item N") unexplained — even without a broken link.** Found
+  2026-09-11: `abm/experiments/guided-vs-unguided/definition.md` linked
+  into the private repo's épico plan twice, and named "Item 3" without
+  context. Both links were dead for any reader without private access,
+  and — worse — signaled "there's more you can't see" even to a reader
+  who did have access, undermining the document's credibility as a
+  standalone spec. The content those links pointed to added nothing the
+  surrounding paragraph didn't already say; the fix was deleting the
+  pointer, not writing a public-safe paraphrase. Only this file and
+  `.gitignore` are allowed to name the private repo's path — that's
+  where explaining *where private content lives* is the actual job of
+  the file, not a leak into an unrelated specification.
 
 ## Repository structure follows a graduation principle
 

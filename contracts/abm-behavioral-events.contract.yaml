@@ -1,0 +1,253 @@
+# ABM Behavioral Output Contract
+#
+# Owned by the Iceberg Lakehouse Lab (see abm/abm_data_generator.md §20 and
+# abm/README.md) — this is the interface the Lab depends on, kept here
+# rather than under abm/ so it survives unchanged even if the ABM's
+# implementation is ever extracted into its own repository.
+#
+# Grain: one row per agent decision-step (one perceive→decide→act cycle).
+# A completed agent run therefore emits many rows, the last one carrying
+# journey_completed = true (success) or the terminal abandon/timeout action.
+#
+# Status: DRAFT v0.5 (2026-09-11) — drawn from the conceptual field list in
+# abm/abm_data_generator.md §11. Not yet validated against an actual
+# harness implementation; expect revisions once a real pilot run produces
+# actual events to check this against.
+#
+# Design choice (v0.2, extended v0.3-v0.4): this contract fixes the stable
+# ENVELOPE only. Anything whose shape/presence is expected to vary across
+# decision models or journeys — agent_parameters, condition, journey_stage
+# (v0.2), decision_signals i.e. former attention/reward/penalty (v0.3) —
+# is deliberately left open (free-form content, not enum-constrained),
+# with its actual schema owned by the experiment definition named in
+# experiment_id. v0.4: agent_parameters and decision_signals additionally
+# marked required: false — a future decision model may not produce
+# per-agent configuration or diagnostic signals at all, even though THIS
+# experiment's harness always populates both (an implementation
+# guarantee, not one the contract can make for every future experiment).
+# condition/journey_stage stay required: true — they're structurally
+# needed for the primary comparison and stage tracking regardless of
+# decision model. See each field's own description for the reasoning.
+
+apiVersion: v3.0.0
+kind: DataContract
+id: abm-behavioral-events
+name: ABM Behavioral Events
+version: 0.5.0
+status: draft
+domain: iceberg-lakehouse-lab
+description:
+  purpose: >
+    Records every decision-step an ABM agent takes while executing a
+    journey against the target application, with enough context to
+    reconstruct which experiment/condition/agent produced it and whether
+    the journey ultimately succeeded. This is the Lab's own event stream —
+    distinct from, and joined downstream with, the target application's
+    native GA4 events and entity-table rows (see
+    abm/abm_data_generator.md §12-13).
+  usage: >
+    Ingested by foundation/ingestion/ into Iceberg bronze, joined against
+    the target application's GA4/Supabase data via session_id, and used to
+    compute the primary metric (journey completion rate) and secondary
+    metrics (time to completion, abandonment rate, action count, deviation
+    from expected path) defined in abm/abm_data_generator.md §14.
+  limitations: >
+    Draft schema — field set matches the conceptual list in
+    abm/abm_data_generator.md §11 but types/nullability have not yet been
+    exercised against a real harness run. agent_parameters/condition/
+    journey_stage are intentionally open-ended (see design choice above);
+    no experiment definition exists yet to validate their actual content
+    against.
+
+schema:
+  - name: abm_event
+    logicalType: object
+    physicalType: table
+    description: One decision-step taken by one agent during one run.
+    properties:
+      - name: experiment_id
+        logicalType: string
+        physicalType: varchar
+        required: true
+        description: >
+          Identifies the experiment definition (e.g. a named
+          Guided-vs-Unguided comparison). Stable across every run/agent
+          that belongs to the same experiment.
+
+      - name: run_id
+        logicalType: string
+        physicalType: uuid
+        required: true
+        description: >
+          Identifies one execution batch of the harness (see
+          abm/abm_data_generator.md §15 — "every run should be
+          identifiable and reproducible"). Every agent in the same batch
+          shares a run_id.
+
+      - name: agent_id
+        logicalType: string
+        physicalType: uuid
+        required: true
+        description: Identifies one simulated agent within a run.
+
+      - name: agent_parameters
+        logicalType: object
+        physicalType: json
+        required: false
+        description: >
+          Free-form, possibly multi-level key-value configuration for the
+          agent. This contract deliberately does NOT enumerate which keys
+          exist (e.g. goal_seeking, exploration, visual_sensitivity,
+          time_cost, abandonment_propensity — the current experiment's
+          parameters per abm/abm_data_generator.md §6) — that schema is
+          owned by the experiment definition that produced this event
+          (abm/abm_data_generator.md §15: each experiment declares its own
+          "population definition" and "parameter distributions"), not by
+          this contract, because it is expected to change as the
+          behavioral model evolves (§6: "these parameters are hypotheses
+          for the initial model and may be changed through
+          experimentation"; §18 anticipates richer distributions and
+          adaptive agents). Consumers resolve specific keys against the
+          experiment named in `experiment_id`, not against this contract.
+          Physical representation at ingestion time (JSON string, MAP,
+          engine-native VARIANT/STRUCT) is an open decision for
+          foundation/ingestion/, not fixed here.
+          `required: false` at the contract level — not because it's
+          unimportant (it's essential to this experiment's own analysis,
+          §16's parameter-variation checks) but because a future
+          decision model might have no configurable per-agent parameters
+          at all. This experiment's own harness is expected to always
+          populate it in practice; that's an implementation guarantee,
+          not one this contract can make for every experiment that will
+          ever use it.
+
+      - name: condition
+        logicalType: string
+        physicalType: varchar
+        required: true
+        description: >
+          Experimental condition this agent was assigned to. Deliberately
+          not constrained to an enum here, for the same reason as
+          agent_parameters: valid values are defined per experiment (the
+          initial one uses "guided"/"unguided", but abm/abm_data_generator.md
+          §15 anticipates experiments that vary individual parameters
+          instead of a small set of named conditions) — resolve against the
+          experiment named in `experiment_id`.
+
+      - name: session_id
+        logicalType: string
+        physicalType: varchar
+        required: true
+        description: >
+          The target application's own session/user identifier for this
+          agent's run — the join key back to its native GA4 events and
+          entity-table rows. Exact source is an integration detail outside
+          this contract's scope.
+
+      - name: timestamp
+        logicalType: date
+        physicalType: timestamp
+        required: true
+        description: When this event was recorded, UTC, ISO 8601.
+
+      - name: screen
+        logicalType: string
+        physicalType: varchar
+        required: true
+        description: Screen/route the agent was on when this decision was made.
+
+      - name: element
+        logicalType: string
+        physicalType: varchar
+        required: false
+        description: >
+          The perceived element the action targeted, if any (null for
+          actions like abandon that target no specific element).
+
+      - name: action
+        logicalType: string
+        physicalType: varchar
+        required: true
+        description: >
+          The action the agent's decision policy sampled and executed.
+          abandon_idle and abandon_logout are both terminal (end the run)
+          but distinct executed mechanisms — idle covers "went quiet until
+          timeout" in all its real-world equivalents (switched tabs,
+          closed the browser — indistinguishable from this contract's
+          point of view, since neither produces a further event either
+          way), logout is an explicit, observable sign-out action.
+          Navigating to an unrelated product area is NOT a separate
+          abandon variant — it's ordinary `explore`/`navigate`; if the
+          agent never returns, that shows up as the run simply having no
+          more events from that screen, not as a distinct action value.
+        logicalTypeOptions:
+          enum: [click, type, navigate, explore, abandon_idle, abandon_logout, wait]
+
+      - name: decision_signals
+        logicalType: object
+        physicalType: json
+        required: false
+        description: >
+          Free-form internal output of whatever decision model produced
+          this step (e.g. attention/reward/penalty in the current
+          softmax-over-utility model — abm/abm_data_generator.md §6-8).
+          Deliberately not fixed to those 3 fields: this is diagnostic/
+          interpretability data specific to one decision-model
+          implementation, not a cross-ABM-framework standard (classic ABM
+          frameworks don't have a universal reward/attention formalism —
+          it's an RL/cognitive-science borrowing specific to this model).
+          Correction (v0.4): this IS used by this experiment — §14 lists
+          "estimated attention/reward trajectory" as a secondary metric —
+          so it matters here, just not universally. §18 anticipates
+          decision models (LLM-based, adaptive) that may not produce
+          these same 3 signals at all, which is why `required: false` at
+          the contract level: this experiment's harness is expected to
+          always populate it in practice; that's an implementation
+          guarantee, not one this contract can make for every experiment
+          that will ever use it. Shape owned by the experiment/decision-model
+          version named in experiment_id, same treatment as
+          agent_parameters.
+
+      - name: elapsed_time
+        logicalType: number
+        physicalType: float
+        required: true
+        description: Seconds elapsed since this agent's run started.
+
+      - name: journey_stage
+        logicalType: string
+        physicalType: varchar
+        required: true
+        description: >
+          Furthest journey stage reached as of this event. Not constrained
+          to an enum here, same reasoning as condition: the current journey
+          is Company→Team→Member ("none"/"company"/"team"/"member"), but
+          abm/abm_data_generator.md §18 anticipates additional journeys —
+          the valid stage vocabulary is defined per journey/experiment, not
+          by this contract.
+
+      - name: journey_completed
+        logicalType: boolean
+        physicalType: boolean
+        required: true
+        description: >
+          Whether the full journey (Company ≥ 1, Team ≥ 1, Member ≥ 1) was
+          complete as of this event.
+
+quality:
+  - description: >
+      Every (run_id, agent_id) pair should have exactly one event with
+      action = abandon OR journey_completed = true as its last row by
+      timestamp — a run should never just trail off without a terminal
+      event.
+    dimension: completeness
+    status: not yet implemented
+  - description: >
+      Value ranges/required keys for agent_parameters (and valid values
+      for condition/journey_stage) are validated against the experiment
+      definition named by experiment_id, not by this contract — this
+      contract only guarantees the fields exist. Each experiment
+      definition (abm/experiments/) is responsible for documenting and
+      validating its own parameter ranges.
+    dimension: validity
+    status: not yet implemented — no experiment definition exists yet to validate against

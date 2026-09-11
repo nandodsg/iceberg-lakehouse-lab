@@ -19,4 +19,8 @@ ever extracted into its own repository on graduation. See
 This directory does **not** contain matriz-senioridade's export contracts —
 those remain authoritative in that repository. The Lab only consumes them.
 
-Not yet populated.
+## Contents
+
+- [`abm-behavioral-events.contract.yaml`](abm-behavioral-events.contract.yaml)
+  — DRAFT v0.1. One row per ABM agent decision-step; see the file's own
+  header for grain, status, and open validation items.
