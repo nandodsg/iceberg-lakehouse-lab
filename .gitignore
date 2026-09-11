@@ -1,0 +1,55 @@
+# OpenTofu / Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+
+# dbt
+target/
+dbt_packages/
+logs/
+
+# Airflow
+airflow.cfg
+airflow.db
+**/airflow-logs/
+*.pyc
+__pycache__/
+
+# Python
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node (tooling, if any)
+node_modules/
+
+# Env / secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Raw / synthetic data exports — never commit
+data/raw/
+*.parquet
+*.csv
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Defense-in-depth only — NOT the mechanism that protects Matriz
+# confidentiality (see AGENTS.md's hard rule). Private notes belong in
+# ../iceberg-lakehouse-lab-private-notes/, outside this repo entirely, not
+# in a gitignored folder inside it. This just catches an accidental slip.
+*private-notes*
+
