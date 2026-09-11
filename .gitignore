@@ -28,6 +28,16 @@ venv/
 
 # Node (tooling, if any)
 node_modules/
+dist/
+
+# ABM harness — real config, real integration module, real run output.
+# Never commit any of these (see abm/harness/README.md).
+abm/harness/runs/
+abm/harness/*.local.json
+abm/harness/*.local.js
+abm/harness/config.local.json
+abm/harness/integration.local.js
+abm/harness/accounts.local.json
 
 # Env / secrets — never commit
 .env

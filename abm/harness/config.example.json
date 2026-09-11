@@ -1,0 +1,7 @@
+{
+  "_comment": "Template only — copy to a gitignored path (e.g. config.local.json) and fill in real values there. Never commit a filled-in copy.",
+  "baseUrl": "https://your-target-app.example.com",
+  "timeoutSeconds": 600,
+  "integrationModulePath": "./integration.local.js",
+  "outputDir": "runs"
+}

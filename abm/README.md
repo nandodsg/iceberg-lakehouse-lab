@@ -13,6 +13,11 @@ directory.
   research question, agent/perception/decision model, scope constraints.
 - [`experiments/`](experiments/) — experiment definitions, run configs, and
   results; also the settled decisions log for how the ABM is implemented.
+- [`harness/`](harness/) — the perception+decision+actuation mechanism
+  itself (TypeScript/Node, Playwright), runnable from the command line.
+  Generic; its only two integration points with any real target
+  application are defined, never implemented, here — see
+  [`harness/README.md`](harness/README.md).
 
 **What deliberately does NOT live here:** the ABM's own behavioral output
 contract stays in the top-level [`contracts/`](../contracts/) directory, not
@@ -22,5 +27,3 @@ depends on stays stable and Lab-controlled if this whole module is ever
 extracted into its own repository. Only the *implementation* (population
 design, decision harness, run configs) is meant to move with `abm/` on
 graduation — the contract does not.
-
-Not yet implemented.
