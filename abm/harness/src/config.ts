@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { HarnessConfig, IntegrationModule } from "./types.js";
 
 /**
@@ -33,7 +34,9 @@ export async function loadIntegrationModule(
   config: HarnessConfig
 ): Promise<IntegrationModule> {
   const modulePath = resolve(dirnameOf(configPath), config.integrationModulePath);
-  const mod = await import(modulePath);
+  // file:// URL, not a bare path — Node's ESM loader rejects absolute
+  // Windows paths ("c:" is not a URL scheme).
+  const mod = await import(pathToFileURL(modulePath).href);
   const impl: IntegrationModule = mod.default ?? mod;
   if (typeof impl.authenticate !== "function" || typeof impl.getJourneyState !== "function") {
     throw new Error(
