@@ -167,6 +167,28 @@ distillation; treat it as binding unless new evidence overturns it.
 - Document decisions, trade-offs, limitations and evidence rather than
   presenting assumptions as facts.
 
+## Work planning (épicos) lives only in the private repo
+
+This project plans significant changes as an "épico" (one folder per
+change, `plano.md` in 2 layers — session log + per-item status note —
+plus a manual verification roteiro when applicable). **All of that
+planning documentation — for every épico, whether or not it touches
+Matriz — lives entirely in
+`../iceberg-lakehouse-lab-private-notes/epicos/`, never here.** Decided
+2026-09-11: a mirror/summary in this repo wasn't worth the upkeep, and
+mixing work-session logs with public-facing documentation isn't the goal
+here while the project is in progress.
+
+When the project gets closer to actually being shared publicly (as a
+portfolio piece, not just technically public on GitHub), it's worth
+revisiting the general documentation and deliberately, selectively
+folding in historical/factual elements relevant to the portfolio and
+learning narrative — as its own separate curation done at that time, not
+a continuous sync with the private épicos.
+
+`iceberg-lakehouse-lab.md` and `abm/abm_data_generator.md` remain the
+living architecture documents (long-term view) — they are not épicos.
+
 ## Known naming inconsistency
 
 `iceberg-lakehouse-lab.md` §11 names the root doc `LAB.md`; the actual file
