@@ -67,6 +67,26 @@ export interface PerceivedElement {
   inDialog: boolean;
 }
 
+/**
+ * Overridable knobs of the decision policy — every value has a default in
+ * decision.ts (the current calibration); a run's config can override any
+ * of them so that two policies can be compared without a rebuild.
+ * Calibration rounds are recorded in the epic plan as sets of these.
+ */
+export interface PolicyOverrides {
+  temperature?: number;
+  /** Multiplier on a filled form field's attention (1 = no discount). */
+  filledFieldAttentionFactor?: number;
+  /** Multiplier on direct click/navigate utility of an already-used control. */
+  revisitDirectFactor?: number;
+  /** Per-return multiplier on explore novelty of a screen already seen (1 = off). */
+  screenRevisitExploreFactor?: number;
+  /** Multiplier on controls with destructive vocabulary. */
+  destructiveFactor?: number;
+  /** Multiplier on close/cancel controls inside a dialog with empty required fields. */
+  dismissWhileIncompleteFactor?: number;
+}
+
 export interface DecisionContext {
   candidates: PerceivedElement[];
   params: AgentParameters;
@@ -76,6 +96,7 @@ export interface DecisionContext {
   rng: () => number;
   /** How many times this run has already been on the current `screen` (0 = first time). */
   screenVisits: number;
+  policy?: PolicyOverrides;
 }
 
 export interface DecisionResult {
@@ -139,4 +160,6 @@ export interface HarnessConfig {
    * never in this package.
    */
   excludeElementPattern?: string;
+  /** See PolicyOverrides — omitted keys keep decision.ts defaults. */
+  policy?: PolicyOverrides;
 }

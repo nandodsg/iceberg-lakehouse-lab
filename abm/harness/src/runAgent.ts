@@ -90,6 +90,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
       timeoutSeconds: config.timeoutSeconds,
       rng,
       screenVisits: (screenVisitCounts.get(screenNow) ?? 1) - 1,
+      policy: config.policy,
     });
 
     await recorder.record(

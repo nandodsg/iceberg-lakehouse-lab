@@ -52,13 +52,26 @@ const ABANDON_PRESSURE_WEIGHT = 3.0;
 // form before pressing the button, and the button does nothing otherwise.
 const REQUIRED_FIELD_PROGRESS = 0.8;
 
-// Calibration round 4 (2026-09-15, after watching piloto-03 videos) —
-// four generic UX priors, none of them knowledge of any specific route:
+// A field that already has a value draws far less attention than an empty
+// one — piloto-02 (2026-09-15) had an agent re-type the same field 8 times.
+const FILLED_FIELD_ATTENTION_FACTOR = 1.0;
+
+// Calibration rounds 4-5 (2026-09-15) tried four generic UX priors (below,
+// all defaulting to 1.0 = off). Replicated comparison — same population,
+// 3 runs per policy — showed the "round 3" policy (all off) reaches
+// company/team MORE often (3.33 vs 1.67 of 6; team only ever with it) and
+// keeps goal-seeking agents in the area under study more (59% vs 89% of
+// steps outside); what the priors buy is cosmetic (less A→B→A
+// ping-pong, 1.3 vs 3.3). Defaults therefore stay at the round-3 policy;
+// the priors remain available as `policy` overrides in the run config
+// (see PolicyOverrides). The structural fix for ping-pong is a persistent
+// goal, not a revisit penalty — next epic.
+// The four priors, none of them knowledge of any specific route:
 // - a control already used this run is much less attractive to use
 //   again directly (humans rarely re-click the same link back and forth;
 //   piloto-03 agents ping-ponged between the same 3 navigation links for
 //   the first 20-30 s);
-const REVISIT_DIRECT_FACTOR = 0.3;
+const REVISIT_DIRECT_FACTOR = 1.0;
 // - a screen already seen is less interesting to explore (memory of
 //   "I've been here"), decaying with each return. Round 5 (2026-09-15)
 //   set this to 1.0 (off): with the same population, 0.5 pushed agents
@@ -69,7 +82,7 @@ const SCREEN_REVISIT_EXPLORE_FACTOR = 1.0;
 // - destructive vocabulary makes a human hesitate (piloto-03 agents
 //   wandered into account-deletion pages);
 const DESTRUCTIVE_TEXT_PATTERN = /\b(delete|remove|excluir|remover|apagar|eliminar|destroy)\b/i;
-const DESTRUCTIVE_FACTOR = 0.3;
+const DESTRUCTIVE_FACTOR = 1.0;
 // - inside an open dialog with required fields still empty, the controls
 //   that close/cancel it lose pull: whoever opened a form tends to try to
 //   finish it (a minimal form of intent persistence). Round 5: 0.2 → 0.5 —
@@ -77,7 +90,7 @@ const DESTRUCTIVE_FACTOR = 0.3;
 //   finished it, which erased goal_seeking's role (a 0.18 agent created a
 //   company, a 0.78 one didn't).
 const DISMISS_TEXT_PATTERN = /\b(close|cancel|fechar|cancelar|voltar|back)\b|^[×x✕]$/i;
-const DISMISS_WHILE_INCOMPLETE_FACTOR = 0.5;
+const DISMISS_WHILE_INCOMPLETE_FACTOR = 1.0;
 
 // Common sign-out vocabulary across languages — a generic UI convention,
 // not knowledge specific to any one application. A control that reads
@@ -94,6 +107,14 @@ interface Option {
 
 export function decide(ctx: DecisionContext): DecisionResult {
   const { candidates, params, elapsedSeconds, timeoutSeconds, screenVisits } = ctx;
+  const pol = {
+    temperature: ctx.policy?.temperature ?? TEMPERATURE,
+    filledFieldAttentionFactor: ctx.policy?.filledFieldAttentionFactor ?? FILLED_FIELD_ATTENTION_FACTOR,
+    revisitDirectFactor: ctx.policy?.revisitDirectFactor ?? REVISIT_DIRECT_FACTOR,
+    screenRevisitExploreFactor: ctx.policy?.screenRevisitExploreFactor ?? SCREEN_REVISIT_EXPLORE_FACTOR,
+    destructiveFactor: ctx.policy?.destructiveFactor ?? DESTRUCTIVE_FACTOR,
+    dismissWhileIncompleteFactor: ctx.policy?.dismissWhileIncompleteFactor ?? DISMISS_WHILE_INCOMPLETE_FACTOR,
+  };
   const goalSeeking = params.goal_seeking ?? 0.5;
   const exploration = params.exploration ?? 0.5;
   const visualSensitivity = params.visual_sensitivity ?? 0.5;
@@ -109,15 +130,13 @@ export function decide(ctx: DecisionContext): DecisionResult {
   // "explore something" should weigh about the same on a page with 3
   // unvisited controls as on one with 30.
   const unvisitedCount = Math.max(1, candidates.filter((c) => !c.visited).length);
-  const exploreNormalization = Math.log(unvisitedCount) * TEMPERATURE;
+  const exploreNormalization = Math.log(unvisitedCount) * pol.temperature;
 
   for (const el of candidates) {
     if (el === logoutTarget) continue;
     const salience = computeSalience(el);
-    // A field that already has a value draws far less attention than an
-    // empty one — piloto-02 (2026-09-15) had an agent re-type the same
-    // field 8 times because visual salience alone doesn't know it's done.
-    const attention = salience * visualSensitivity * (el.isFormField && el.filled ? 0.25 : 1);
+    const attention =
+      salience * visualSensitivity * (el.isFormField && el.filled ? pol.filledFieldAttentionFactor : 1);
     let progressSignal = el.isPrimaryStyled ? 1 : 0;
     if (el.isFormField && el.required && !el.filled) progressSignal = Math.max(progressSignal, REQUIRED_FIELD_PROGRESS);
     if (el.isSubmit && requiredEmpty > 0) progressSignal = 0;
@@ -126,11 +145,11 @@ export function decide(ctx: DecisionContext): DecisionResult {
 
     // Generic hesitation/commitment priors (see constants above).
     let caution = 1;
-    if (DESTRUCTIVE_TEXT_PATTERN.test(el.text)) caution *= DESTRUCTIVE_FACTOR;
+    if (DESTRUCTIVE_TEXT_PATTERN.test(el.text)) caution *= pol.destructiveFactor;
     if (el.inDialog && requiredEmpty > 0 && !el.isFormField && !el.isSubmit && DISMISS_TEXT_PATTERN.test(el.text)) {
-      caution *= DISMISS_WHILE_INCOMPLETE_FACTOR;
+      caution *= pol.dismissWhileIncompleteFactor;
     }
-    if (el.visited && !el.isFormField) caution *= REVISIT_DIRECT_FACTOR;
+    if (el.visited && !el.isFormField) caution *= pol.revisitDirectFactor;
 
     // Goal-directed pull toward this element.
     const clickUtility = (attention + goalSeeking * progressSignal) * caution;
@@ -144,7 +163,7 @@ export function decide(ctx: DecisionContext): DecisionResult {
     // Curiosity pull toward this element, independent of whether it
     // looks like the "correct" action — much weaker once already
     // visited this run, and weaker on a screen already seen.
-    const novelty = (el.visited ? 0.1 : 1) * Math.pow(SCREEN_REVISIT_EXPLORE_FACTOR, screenVisits);
+    const novelty = (el.visited ? 0.1 : 1) * Math.pow(pol.screenRevisitExploreFactor, screenVisits);
     const exploreUtility = exploration * novelty * caution;
     options.push({
       action: "explore",
@@ -179,7 +198,7 @@ export function decide(ctx: DecisionContext): DecisionResult {
     signals: { penalty: timePressure },
   });
 
-  const weights = options.map((o) => Math.exp(o.utility / TEMPERATURE));
+  const weights = options.map((o) => Math.exp(o.utility / pol.temperature));
   const chosen = weightedPick(ctx.rng, options, weights);
 
   return {
