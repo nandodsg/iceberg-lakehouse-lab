@@ -60,17 +60,24 @@ const REQUIRED_FIELD_PROGRESS = 0.8;
 //   the first 20-30 s);
 const REVISIT_DIRECT_FACTOR = 0.3;
 // - a screen already seen is less interesting to explore (memory of
-//   "I've been here"), decaying with each return;
-const SCREEN_REVISIT_EXPLORE_FACTOR = 0.5;
+//   "I've been here"), decaying with each return. Round 5 (2026-09-15)
+//   set this to 1.0 (off): with the same population, 0.5 pushed agents
+//   OUT of the area under study (the entry screen is always "already
+//   seen") — outside share 64% → 89%, reached-team 2/6 → 0/6. Kept as a
+//   knob, documented as harmful at 0.5.
+const SCREEN_REVISIT_EXPLORE_FACTOR = 1.0;
 // - destructive vocabulary makes a human hesitate (piloto-03 agents
 //   wandered into account-deletion pages);
 const DESTRUCTIVE_TEXT_PATTERN = /\b(delete|remove|excluir|remover|apagar|eliminar|destroy)\b/i;
 const DESTRUCTIVE_FACTOR = 0.3;
 // - inside an open dialog with required fields still empty, the controls
 //   that close/cancel it lose pull: whoever opened a form tends to try to
-//   finish it (a minimal form of intent persistence).
+//   finish it (a minimal form of intent persistence). Round 5: 0.2 → 0.5 —
+//   at 0.2 an agent that opened the form by accident almost always
+//   finished it, which erased goal_seeking's role (a 0.18 agent created a
+//   company, a 0.78 one didn't).
 const DISMISS_TEXT_PATTERN = /\b(close|cancel|fechar|cancelar|voltar|back)\b|^[×x✕]$/i;
-const DISMISS_WHILE_INCOMPLETE_FACTOR = 0.2;
+const DISMISS_WHILE_INCOMPLETE_FACTOR = 0.5;
 
 // Common sign-out vocabulary across languages — a generic UI convention,
 // not knowledge specific to any one application. A control that reads
