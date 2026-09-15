@@ -51,12 +51,19 @@ async function main() {
       // agents are the same (learned the hard way on 2026-09-15, when
       // three rounds were compared with three different populations).
       "population-seed": { type: "string" },
+      // Agents run in parallel up to this many at once (default 1 =
+      // sequential, the pilot's cautious choice). Every agent is
+      // independent by construction — own account, own seeded RNG, own
+      // browser context, own rows — so concurrency changes wall-clock
+      // time, not results. Watch the target's latency: an overloaded dev
+      // server inflates action timeouts and elapsed_time per step.
+      concurrency: { type: "string", default: "1" },
     },
   });
 
   if (!values.config || !values.experiment || !values.condition || !values.accounts) {
     console.error(
-      "Usage: cli --config <path> --experiment <id> --condition <guided|unguided> --accounts <path> [--count N] [--run-id id] [--baseline] [--record video|trace|both] [--population-seed <run-id>]"
+      "Usage: cli --config <path> --experiment <id> --condition <guided|unguided> --accounts <path> [--count N] [--run-id id] [--baseline] [--record video|trace|both] [--population-seed <run-id>] [--concurrency N]"
     );
     process.exit(1);
   }
@@ -84,15 +91,20 @@ async function main() {
     );
   }
 
+  const concurrency = Math.max(1, parseInt(values.concurrency!, 10) || 1);
   const browser = await chromium.launch();
   try {
-    for (let i = 0; i < population.length; i++) {
+    // One shared recorder: each event is a single appendFile() of one
+    // line, which the OS applies atomically in append mode — concurrent
+    // agents interleave lines, never bytes.
+    const recorder = new Recorder(`${config.outputDir}/${runId}.jsonl`);
+    await recorder.init();
+
+    const runOne = async (i: number): Promise<void> => {
       const agentId = population[i].agentId;
       const account = accounts[i];
-      const recorder = new Recorder(`${config.outputDir}/${runId}.jsonl`);
-      await recorder.init();
 
-      console.log(`[${i + 1}/${population.length}] agent ${agentId} (${values.condition})`);
+      console.log(`[${i + 1}/${population.length}] agent ${agentId} (${values.condition}) started`);
       const context = await browser.newContext({
         baseURL: config.baseUrl,
         viewport: { width: 1280, height: 800 },
@@ -126,8 +138,19 @@ async function main() {
           const tmp = await video.path().catch(() => null);
           if (tmp) await rename(tmp, `${recordingDir}/${agentId}.webm`).catch(() => {});
         }
+        console.log(`[${i + 1}/${population.length}] agent ${agentId} done`);
       }
-    }
+    };
+
+    // Worker pool: `concurrency` workers pull the next index until none left.
+    let next = 0;
+    const workers = Array.from({ length: Math.min(concurrency, population.length) }, async () => {
+      while (next < population.length) {
+        const i = next++;
+        await runOne(i);
+      }
+    });
+    await Promise.all(workers);
   } finally {
     await browser.close();
   }
