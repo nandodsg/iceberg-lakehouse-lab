@@ -21,12 +21,17 @@ import type { AgentParameters, SyntheticAccount } from "./types.js";
  * different experiment, its own definition governs, not this file.
  */
 
+// Order matters for reproducibility: each name consumes one rng() draw in
+// order, so appending "commitment" at the end reproduces the same first 5
+// values for a given --population-seed as before v2, plus one new
+// deterministic draw for the 6th parameter.
 const PARAM_NAMES = [
   "goal_seeking",
   "exploration",
   "visual_sensitivity",
   "time_cost",
   "abandonment_propensity",
+  "commitment",
 ] as const;
 
 async function main() {

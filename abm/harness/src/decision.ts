@@ -1,4 +1,4 @@
-import type { DecisionContext, DecisionResult, PerceivedElement, Action } from "./types.js";
+import type { DecisionContext, DecisionResult, GoalState, PerceivedElement, Action } from "./types.js";
 import { weightedPick } from "./rng.js";
 
 /**
@@ -92,6 +92,18 @@ const DESTRUCTIVE_FACTOR = 1.0;
 const DISMISS_TEXT_PATTERN = /\b(close|cancel|fechar|cancelar|voltar|back)\b|^[×x✕]$/i;
 const DISMISS_WHILE_INCOMPLETE_FACTOR = 1.0;
 
+// Persistent-goal mechanism (guided-vs-unguided/definition.md, "Goal
+// state"): the structural fix the round 4-5 heuristics above couldn't be —
+// a real short-lived intention that persists across steps instead of a
+// per-step discount. None of these four constants have been calibrated
+// against real runs yet (that's the next epic item); values below are
+// conservative starting guesses, same role TEMPERATURE etc. played before
+// their first pilot.
+const GOAL_PULL_WEIGHT = 0.5;
+const DISTRACTION_DAMPING = 0.5;
+const GOAL_DROP_BASE = 0.15;
+const GOAL_MAX_AGE = 6;
+
 // Common sign-out vocabulary across languages — a generic UI convention,
 // not knowledge specific to any one application. A control that reads
 // like sign-out is only ever offered as `abandon_logout`, never as
@@ -103,6 +115,10 @@ interface Option {
   target?: PerceivedElement;
   utility: number;
   signals: Record<string, number>;
+  /** Pull this option received from the active goal this step (0 if none/not coherent). */
+  goalPull?: number;
+  /** Whether this option's target is inside the active goal's scope (see GoalState). */
+  coherent?: boolean;
 }
 
 export function decide(ctx: DecisionContext): DecisionResult {
@@ -114,13 +130,37 @@ export function decide(ctx: DecisionContext): DecisionResult {
     screenRevisitExploreFactor: ctx.policy?.screenRevisitExploreFactor ?? SCREEN_REVISIT_EXPLORE_FACTOR,
     destructiveFactor: ctx.policy?.destructiveFactor ?? DESTRUCTIVE_FACTOR,
     dismissWhileIncompleteFactor: ctx.policy?.dismissWhileIncompleteFactor ?? DISMISS_WHILE_INCOMPLETE_FACTOR,
+    goalPullWeight: ctx.policy?.goalPullWeight ?? GOAL_PULL_WEIGHT,
+    distractionDamping: ctx.policy?.distractionDamping ?? DISTRACTION_DAMPING,
+    goalDropBase: ctx.policy?.goalDropBase ?? GOAL_DROP_BASE,
+    goalMaxAge: ctx.policy?.goalMaxAge ?? GOAL_MAX_AGE,
   };
   const goalSeeking = params.goal_seeking ?? 0.5;
   const exploration = params.exploration ?? 0.5;
   const visualSensitivity = params.visual_sensitivity ?? 0.5;
   const abandonmentPropensity = params.abandonment_propensity ?? 0.5;
+  const commitment = params.commitment ?? 0.5;
 
   const timePressure = computeTimePressure(elapsedSeconds, timeoutSeconds);
+
+  // Goal transition, evaluated before any utility is computed — priority
+  // order matches the experiment definition: a dialog opening always wins
+  // (starting fresh or superseding an `area` goal), otherwise arriving at
+  // an unseen screen can start an `area` goal, otherwise a carried-over
+  // goal is subject to its per-step survival roll. A goal that starts
+  // this step is fully active this step — it never rolls for survival on
+  // its own creation step.
+  const dialogOpen = candidates.some((c) => c.inDialog);
+  let goal: GoalState = ctx.goal ?? null;
+  if (dialogOpen && goal?.kind !== "dialog") {
+    goal = { kind: "dialog", age: 0 };
+  } else if (!goal && !dialogOpen && ctx.screenChanged && screenVisits === 0) {
+    goal = { kind: "area", age: 0 };
+  } else if (goal) {
+    const dropProb = pol.goalDropBase * (1 - commitment);
+    if (ctx.rng() < dropProb) goal = null;
+  }
+  const goalActive = goal !== null;
 
   const options: Option[] = [];
 
@@ -151,20 +191,42 @@ export function decide(ctx: DecisionContext): DecisionResult {
     }
     if (el.visited && !el.isFormField) caution *= pol.revisitDirectFactor;
 
-    // Goal-directed pull toward this element.
-    const clickUtility = (attention + goalSeeking * progressSignal) * caution;
+    // Coherence with the active goal, if any — see GoalState/definition.md
+    // "Goal state". `dialog`: anything perceived inside that dialog.
+    // `area`: anything that already carries a progress signal (reuses the
+    // same test as goal_seeking's pull above, not a new concept).
+    const coherent = goalActive && (goal!.kind === "dialog" ? el.inDialog : progressSignal > 0);
+    const goalPull = coherent ? commitment * pol.goalPullWeight : 0;
+
+    // goal_seeking-directed pull toward this element, now plus the active
+    // goal's pull (§ above) when this element is coherent with it.
+    let clickUtility = (attention + goalSeeking * progressSignal + goalPull) * caution;
+    const directAction = classifyDirectAction(el);
+    // Distraction resistance is `area`-only and navigate-only: leaving an
+    // open dialog is already discouraged by dismissWhileIncompleteFactor
+    // above, so a second discount there would double-count the same thing.
+    if (goalActive && goal!.kind === "area" && directAction === "navigate" && !coherent) {
+      clickUtility *= Math.max(0, 1 - commitment * pol.distractionDamping);
+    }
     options.push({
-      action: classifyDirectAction(el),
+      action: directAction,
       target: el,
       utility: Math.max(clickUtility, 0),
       signals: { attention, reward: goalSeeking * progressSignal },
+      goalPull,
+      coherent,
     });
 
     // Curiosity pull toward this element, independent of whether it
     // looks like the "correct" action — much weaker once already
-    // visited this run, and weaker on a screen already seen.
+    // visited this run, and weaker on a screen already seen. Also
+    // resisted while a goal is active and this element isn't coherent
+    // with it, regardless of goal kind.
     const novelty = (el.visited ? 0.1 : 1) * Math.pow(pol.screenRevisitExploreFactor, screenVisits);
-    const exploreUtility = exploration * novelty * caution;
+    let exploreUtility = exploration * novelty * caution;
+    if (goalActive && !coherent) {
+      exploreUtility *= Math.max(0, 1 - commitment * pol.distractionDamping);
+    }
     options.push({
       action: "explore",
       target: el,
@@ -201,10 +263,31 @@ export function decide(ctx: DecisionContext): DecisionResult {
   const weights = options.map((o) => Math.exp(o.utility / pol.temperature));
   const chosen = weightedPick(ctx.rng, options, weights);
 
+  // Goal outcome for next step: satisfied by the chosen action, expired
+  // by its age ceiling, or persisting. A goal that was dropped or never
+  // active above is simply not carried forward.
+  let nextGoal: GoalState = null;
+  if (goal) {
+    const satisfied =
+      !!chosen.coherent &&
+      (goal.kind === "dialog" ? chosen.action === "click" && !!chosen.target?.isSubmit : true);
+    if (!satisfied) {
+      const nextAge = goal.age + 1;
+      if (nextAge < pol.goalMaxAge) nextGoal = { kind: goal.kind, age: nextAge };
+    }
+  }
+
   return {
     action: chosen.action,
     target: chosen.target,
-    decision_signals: { ...chosen.signals, time_pressure: timePressure },
+    decision_signals: {
+      ...chosen.signals,
+      time_pressure: timePressure,
+      goal: goal ? (goal.kind === "dialog" ? 1 : 2) : 0,
+      goal_age: goal?.age ?? 0,
+      goal_pull: chosen.goalPull ?? 0,
+    },
+    nextGoal,
   };
 }
 

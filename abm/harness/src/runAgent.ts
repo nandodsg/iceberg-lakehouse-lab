@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import type {
   AbmEvent,
   AgentParameters,
+  GoalState,
   HarnessConfig,
   IntegrationModule,
   SyntheticAccount,
@@ -39,6 +40,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
   const visitedRefs = new Set<string>();
   const screenVisitCounts = new Map<string, number>();
   let lastScreen = "";
+  let goal: GoalState = null;
   const exclude = config.excludeElementPattern ? new RegExp(config.excludeElementPattern, "i") : undefined;
   let terminalRecorded = false;
   let actFailures = 0;
@@ -78,7 +80,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     // Screen-level memory: count arrivals, not steps — staying on a screen
     // for 20 steps is one visit.
     const screenNow = safePathname(page);
-    if (screenNow !== lastScreen) {
+    const screenChanged = screenNow !== lastScreen;
+    if (screenChanged) {
       screenVisitCounts.set(screenNow, (screenVisitCounts.get(screenNow) ?? 0) + 1);
       lastScreen = screenNow;
     }
@@ -90,8 +93,11 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
       timeoutSeconds: config.timeoutSeconds,
       rng,
       screenVisits: (screenVisitCounts.get(screenNow) ?? 1) - 1,
+      screenChanged,
+      goal,
       policy: config.policy,
     });
+    goal = result.nextGoal;
 
     await recorder.record(
       buildEvent({

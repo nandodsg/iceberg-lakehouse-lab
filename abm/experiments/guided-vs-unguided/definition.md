@@ -84,9 +84,9 @@ A/B testing capability becoming available in STG. This experiment
 definition covers both conditions so it's ready the moment that
 dependency clears — it does not mean both run now.
 
-## agent_parameters — the 5 parameters, their range, and how they're sampled
+## agent_parameters — the 6 parameters, their range, and how they're sampled
 
-All 5 parameters from `abm_data_generator.md` §6, normalized to **[0, 1]**
+All 6 parameters from `abm_data_generator.md` §6, normalized to **[0, 1]**
 (no principled reason yet to use a different scale — revisit if a
 parameter turns out to need one, e.g. `time_cost` might eventually want
 units tied to the 10-minute window instead of an abstract [0,1] weight).
@@ -98,19 +98,100 @@ units tied to the 10-minute window instead of an abstract [0,1] weight).
 | `visual_sensitivity` | sensitivity to visual complexity/salience of perceived elements | higher → perceived salience influences attention more strongly |
 | `time_cost` | cost weight associated with elapsed time / pressure from the 10-minute limit | higher → more likely to rush or abandon as time passes |
 | `abandonment_propensity` | propensity to abandon when perceived progress/expected reward is insufficient | higher → more likely to abandon early |
+| `commitment` | persistence of the agent's current goal (§8, "Goal state" below) — resistance to dropping it before it is satisfied | higher → more likely to finish what it started before moving on to something else |
 
 **Sampling, per agent, independently per parameter:**
-`Uniform(0, 1)` — no covariance between parameters assumed for v1. This is
-the simplest defensible default that naturally spreads the population
-across the range, which is what the parameter-variation robustness check
-(`abm_data_generator.md` §16) needs to correlate parameter value against
-outcome. Revisit if v1 results suggest specific parameters need a
-different shape (e.g. skewed, bimodal) to produce meaningful variation.
+`Uniform(0, 1)` — no covariance between parameters assumed for v1, kept
+for v2's new `commitment` parameter too. This is the simplest defensible
+default that naturally spreads the population across the range, which is
+what the parameter-variation robustness check (`abm_data_generator.md`
+§16) needs to correlate parameter value against outcome. Revisit if
+results suggest specific parameters need a different shape (e.g. skewed,
+bimodal) to produce meaningful variation.
 
 **Baseline agent** (§16 "baseline" check — run once, deterministically,
-before the stochastic population): all 5 parameters at the midpoint,
+before the stochastic population): all 6 parameters at the midpoint,
 `0.5`. Sanity-checks that a "neutral" agent produces plausible behavior
 before trusting the sampled population's variation.
+
+## Goal state (v2 decision model)
+
+Extends the decision model described conceptually in
+`abm_data_generator.md` §8 — this section fixes the concrete mechanism
+for this experiment; the general model stays generic there.
+
+**Goal kinds** (at most one active at a time):
+
+| Kind | Trigger | Scope (which candidates count as "coherent" with it) |
+|---|---|---|
+| `dialog` | a modal/dialog becomes the focus of perception | every candidate perceived inside that dialog |
+| `area` | the agent arrives at a screen it has not visited yet this run | candidates on the current screen that already carry a progress signal (primary-styled, or an empty required field) |
+
+`dialog` outranks `area`: if a dialog opens while an `area` goal is
+active, the `area` goal ends immediately (superseded, not resumed later
+if the dialog closes) and a `dialog` goal starts instead. Only one dialog
+can be open at a time (perception already scopes to the topmost one), so
+no further priority rule is needed.
+
+**Lifecycle**, evaluated once per step, in this order:
+
+1. If no goal is active, check the triggers above (in priority order) and
+   start one if either fires. A goal that starts this step is fully
+   active this step (`goal_age = 0`) — it does not wait a step to take
+   effect.
+2. If a goal is active, first roll its survival for this step: it ends
+   ("dropped") with probability `GOAL_DROP_BASE × (1 − commitment)` —
+   this is the "probability of abandoning the goal per step" that
+   `commitment` governs. A dropped goal produces no pull this step; the
+   agent decides exactly as it would with no goal at all.
+3. A goal that survives step 2 pulls the softmax toward its coherent
+   candidates and resists incoherent ones (see "Utility mechanics"
+   below), then:
+   - ends as **satisfied** if the step's chosen action produces progress
+     within its scope (a submit inside a `dialog` goal's dialog; any
+     progress-signal-bearing action inside an `area` goal's screen);
+   - otherwise ends as **expired** once its age reaches a fixed ceiling
+     (`GOAL_MAX_AGE` steps), regardless of `commitment` — the ceiling
+     exists so a goal can never lock an agent in indefinitely, however
+     committed it is;
+   - otherwise persists, `goal_age` incremented by one for next step.
+
+**Utility mechanics**, applied only while a goal is active and survives
+step 2 above:
+
+- **Pull**: every coherent candidate's click/type/navigate utility gains
+  `commitment × GOAL_PULL_WEIGHT`, added the same way the existing
+  `goal_seeking × progressSignal` term is — before the layer-1 `caution`
+  multiplier (see below) is applied.
+- **Distraction resistance**: `explore` utility on candidates outside the
+  goal's scope, and (for an `area` goal only) `navigate` utility on
+  candidates outside its scope, is scaled by
+  `(1 − commitment × DISTRACTION_DAMPING)`. A
+  `dialog` goal needs no separate distraction term — leaving an open
+  dialog is already discouraged by the existing
+  `dismissWhileIncompleteFactor` heuristic; adding a second discount for
+  the same behavior would double-count it.
+
+`GOAL_PULL_WEIGHT`, `DISTRACTION_DAMPING`, `GOAL_DROP_BASE` and
+`GOAL_MAX_AGE` are constants to calibrate empirically once the mechanism
+is implemented — no principled starting value yet. Follow the project's
+existing pattern (a conservative default, refined by replicated
+comparison against the baseline this experiment already fixed).
+
+**Layer-1 heuristics carry over unchanged**: `revisitDirectFactor`,
+`screenRevisitExploreFactor`, `destructiveFactor` and
+`dismissWhileIncompleteFactor` (all currently defaulted off) keep their
+existing meaning and defaults in v2 — the goal mechanism is additive to
+them, not a replacement.
+
+**`decision_signals` vocabulary** for this mechanism — diagnostic only,
+`required: false`, does not change the contract:
+
+| Signal | Meaning |
+|---|---|
+| `goal` | code for the currently active goal kind: `0` = none, `1` = `dialog`, `2` = `area` |
+| `goal_age` | steps the current goal has persisted; `0` on the step it started, or on a step where it was dropped or never active |
+| `goal_pull` | the actual pull value added to the chosen option's utility this step by the mechanism above; `0` when no goal is active, the chosen option wasn't in its scope, or the goal was dropped this step |
 
 ## Population size
 
@@ -158,3 +239,9 @@ changes every run and isn't an experiment-design decision.
   discoverability, not the Guided/Unguided journey comparison) — fits
   `abm_data_generator.md` §18 ("additional Matriz journeys") as a future
   candidate, not a variant of this one.
+- **v2 goal mechanism**: should `goal_pull` decay over `goal_age` instead
+  of staying constant for the goal's whole life? Deferred — simplest
+  version first, revisit only if replicated runs show a need for it.
+- **v2 goal mechanism**: should an `area` goal resume if a superseding
+  `dialog` goal closes before expiring, instead of ending permanently?
+  Deferred for the same reason.

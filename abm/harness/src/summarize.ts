@@ -63,6 +63,8 @@ for (const [agentId, ev] of byAgent) {
   console.log(`\n  #    t(s)  screen                                  action          element                                  stage    why`);
   let prevScreen = "";
   let prevStage = "";
+  let prevGoal = 0;
+  const GOAL_NAMES: Record<number, string> = { 1: "dialog", 2: "area" };
   ev.forEach((e, i) => {
     const reasons: string[] = [];
     if (e.screen !== prevScreen) reasons.push("screen change");
@@ -74,6 +76,10 @@ for (const [agentId, ev] of byAgent) {
     if (Number(e.decision_signals?.time_pressure ?? 0) > 0 && !(i > 0 && Number(ev[i - 1].decision_signals?.time_pressure ?? 0) > 0)) {
       reasons.push("time pressure starts");
     }
+    const goalNow = Number(e.decision_signals?.goal ?? 0);
+    if (goalNow !== 0 && prevGoal === 0) reasons.push(`goal set (${GOAL_NAMES[goalNow] ?? goalNow})`);
+    if (goalNow === 0 && prevGoal !== 0) reasons.push("goal dropped");
+    prevGoal = goalNow;
     prevScreen = e.screen;
     prevStage = e.journey_stage;
     if (!values.all && reasons.length === 0) return;

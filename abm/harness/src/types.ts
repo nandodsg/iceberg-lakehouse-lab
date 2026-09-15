@@ -85,7 +85,25 @@ export interface PolicyOverrides {
   destructiveFactor?: number;
   /** Multiplier on close/cancel controls inside a dialog with empty required fields. */
   dismissWhileIncompleteFactor?: number;
+  /** Weight of `commitment × this` added to a goal-coherent candidate's utility (see GoalState). */
+  goalPullWeight?: number;
+  /** Fraction of `commitment` subtracted from incoherent candidates' utility while a goal is active. */
+  distractionDamping?: number;
+  /** Base per-step probability (before `× (1 − commitment)`) that an active goal is dropped. */
+  goalDropBase?: number;
+  /** Steps after which an active goal expires regardless of `commitment`. */
+  goalMaxAge?: number;
 }
+
+/**
+ * A short-lived intention the agent is currently pursuing — see
+ * abm/experiments/guided-vs-unguided/definition.md, "Goal state", for the
+ * full mechanism (trigger, scope, lifecycle). `null` means no goal is
+ * currently active. Persists across steps in runAgent, entering/leaving
+ * decide() through DecisionContext/DecisionResult so decide() itself
+ * stays a pure function of its inputs.
+ */
+export type GoalState = { kind: "dialog" | "area"; age: number } | null;
 
 export interface DecisionContext {
   candidates: PerceivedElement[];
@@ -96,6 +114,10 @@ export interface DecisionContext {
   rng: () => number;
   /** How many times this run has already been on the current `screen` (0 = first time). */
   screenVisits: number;
+  /** Did `screen` change on this step relative to the previous one (true on the run's first step too). */
+  screenChanged: boolean;
+  /** The goal carried over from the previous step, or null. See GoalState. */
+  goal: GoalState;
   policy?: PolicyOverrides;
 }
 
@@ -103,6 +125,8 @@ export interface DecisionResult {
   action: Action;
   target?: PerceivedElement;
   decision_signals: DecisionSignals;
+  /** The goal state to carry into the next step's DecisionContext. */
+  nextGoal: GoalState;
 }
 
 /**

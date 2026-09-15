@@ -177,6 +177,16 @@ The agent reacts to characteristics such as:
 -   propensity to abandon when perceived progress or expected reward
     becomes insufficient.
 
+### Commitment
+
+-   persistence of the agent's current intent across consecutive steps;
+-   resistance to switching away from what it started doing before that
+    intent is satisfied or clearly abandoned.
+
+Introduced together with the persistent-goal mechanism (§8) — earlier
+versions of this model re-decided everything from first principles at
+every step, with no memory of what the agent had been doing.
+
 These parameters are hypotheses for the initial model and may be changed
 through experimentation.
 
@@ -226,11 +236,36 @@ At each interaction point, the agent:
 
 1.  observes the available interface;
 2.  evaluates perceived elements;
-3.  applies its behavioral parameters;
-4.  selects an action;
-5.  receives the resulting environmental feedback;
-6.  updates its state;
-7.  continues, explores or abandons.
+3.  checks whether it is currently pursuing a goal carried over from a
+    previous step, and whether a new one should start or supersede it;
+4.  applies its behavioral parameters — including how strongly its
+    current goal, if any, pulls attention toward coherent elements;
+5.  selects an action;
+6.  receives the resulting environmental feedback;
+7.  updates its state, including whether the current goal was satisfied,
+    dropped, or should persist;
+8.  continues, explores or abandons.
+
+Earlier versions of this model made every decision independently, with no
+memory of what the agent had been doing. Real users carry short-lived
+intent across several steps — "I opened this form, I'll finish it"; "I
+navigated here, I'll do something in this area" — and re-deciding from
+scratch at every step cannot reproduce that, however the other parameters
+are tuned.
+
+From this version onward, the agent may hold a **current goal**: a
+short-lived commitment to a coherent set of elements, established by a
+structural trigger — a modal/form becoming the focus of attention, or
+arriving at a screen not visited yet this run — never a specific route or
+element name, consistent with the rule below that the agent is not told
+which action is correct. A goal persists for a bounded number of steps,
+or until it is satisfied (progress happens within its scope) or dropped
+(governed by the agent's `commitment` parameter, §6) — whichever comes
+first. While a goal is active it increases the perceived value of
+coherent elements and reduces the pull of unrelated ones, without ever
+forcing a specific action. Concrete parameter ranges, sampling and the
+diagnostic signals this mechanism produces are experiment-specific — see
+`abm/experiments/guided-vs-unguided/definition.md`.
 
 The model should avoid hard-coding the expected journey.
 
