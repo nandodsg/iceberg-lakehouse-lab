@@ -37,7 +37,11 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
   const rng = rngForAgent(runId, agentId);
   const startedAt = Date.now();
   const visitedRefs = new Set<string>();
+  const screenVisitCounts = new Map<string, number>();
+  let lastScreen = "";
+  const exclude = config.excludeElementPattern ? new RegExp(config.excludeElementPattern, "i") : undefined;
   let terminalRecorded = false;
+  let actFailures = 0;
 
   await integration.authenticate(page, account);
 
@@ -68,8 +72,16 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
       break;
     }
 
-    const candidates = await perceive(page, { visitedRefs });
+    const candidates = await perceive(page, { visitedRefs, exclude });
     const { stage, completed } = await safeJourneyState(integration, page);
+
+    // Screen-level memory: count arrivals, not steps — staying on a screen
+    // for 20 steps is one visit.
+    const screenNow = safePathname(page);
+    if (screenNow !== lastScreen) {
+      screenVisitCounts.set(screenNow, (screenVisitCounts.get(screenNow) ?? 0) + 1);
+      lastScreen = screenNow;
+    }
 
     const result = decide({
       candidates,
@@ -77,6 +89,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
       elapsedSeconds,
       timeoutSeconds: config.timeoutSeconds,
       rng,
+      screenVisits: (screenVisitCounts.get(screenNow) ?? 1) - 1,
     });
 
     await recorder.record(
@@ -99,11 +112,37 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
 
     if (result.target) visitedRefs.add(result.target.ref);
 
-    await act(page, result, candidates, rng);
+    const outcome = await act(page, result, candidates, rng);
+    if (!outcome.ok) {
+      // Surface it — a batch of silently failing actions still produces a
+      // perfectly well-formed event file (first pilot, 2026-09-15).
+      actFailures += 1;
+      console.warn(`  [${agentId}] ${result.action} on ${JSON.stringify(result.target?.text ?? null)} failed: ${outcome.error}`);
+    }
 
     if (result.action === "abandon_idle" || result.action === "abandon_logout" || completed) {
       terminalRecorded = true;
+      break;
     }
+
+    // Let the page settle after the action, then dwell — a human takes a
+    // moment between decisions; the machine would otherwise burn through
+    // dozens of steps per second and `elapsed_time` would mean nothing.
+    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(DWELL_MIN_MS + rng() * (DWELL_MAX_MS - DWELL_MIN_MS));
+  }
+
+  if (actFailures > 0) console.warn(`  [${agentId}] ${actFailures} action(s) failed to reach the page`);
+}
+
+const DWELL_MIN_MS = 400;
+const DWELL_MAX_MS = 1600;
+
+function safePathname(page: Page): string {
+  try {
+    return new URL(page.url()).pathname;
+  } catch {
+    return page.url();
   }
 }
 

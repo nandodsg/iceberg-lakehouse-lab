@@ -55,6 +55,16 @@ export interface PerceivedElement {
   isPrimaryStyled: boolean;
   /** Has this agent already interacted with this element this run. */
   visited: boolean;
+  /** input/select/textarea — something the agent can fill rather than click. */
+  isFormField: boolean;
+  /** `required` attribute / aria-required on a form field. */
+  required: boolean;
+  /** Form field already has a non-empty value. */
+  filled: boolean;
+  /** Submit control of a form (button[type=submit] or default button inside a form). */
+  isSubmit: boolean;
+  /** Perceived inside an open modal dialog (perception scopes to the topmost one). */
+  inDialog: boolean;
 }
 
 export interface DecisionContext {
@@ -64,6 +74,8 @@ export interface DecisionContext {
   timeoutSeconds: number;
   /** Uniform [0,1) sample, from the run's seeded RNG — never Math.random(). */
   rng: () => number;
+  /** How many times this run has already been on the current `screen` (0 = first time). */
+  screenVisits: number;
 }
 
 export interface DecisionResult {
@@ -119,4 +131,12 @@ export interface HarnessConfig {
   /** Path to a local module implementing IntegrationModule — resolved at runtime, never committed. */
   integrationModulePath: string;
   outputDir: string;
+  /**
+   * Optional regex (source string) — perceived elements whose text matches
+   * are dropped before decision. Generic mechanism for environment noise
+   * that is not part of the application under study (a framework's dev
+   * overlay, a support-chat widget); the value lives in the local config,
+   * never in this package.
+   */
+  excludeElementPattern?: string;
 }

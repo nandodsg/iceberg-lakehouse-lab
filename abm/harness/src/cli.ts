@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename } from "node:fs/promises";
 import { chromium } from "playwright";
 import { loadConfig, loadIntegrationModule } from "./config.js";
 import { runAgent } from "./runAgent.js";
@@ -39,12 +39,24 @@ async function main() {
       accounts: { type: "string" },
       "run-id": { type: "string" },
       baseline: { type: "boolean", default: false },
+      // Per-agent recording — OFF by default, opt-in only: video (.webm) is
+      // for watching what an agent did, trace (.zip, Playwright Trace
+      // Viewer: DOM snapshot per action, network, console) is for
+      // diagnosing why. Sidecar files under runs/<run-id>/<agent-id>.*,
+      // never committed, joined to the JSONL by run_id + agent_id.
+      record: { type: "string" },
+      // Population seed — defaults to the run id. Pass another run's id to
+      // re-draw exactly that run's agent parameters under a different
+      // policy/build: calibration rounds are only comparable when the
+      // agents are the same (learned the hard way on 2026-09-15, when
+      // three rounds were compared with three different populations).
+      "population-seed": { type: "string" },
     },
   });
 
   if (!values.config || !values.experiment || !values.condition || !values.accounts) {
     console.error(
-      "Usage: cli --config <path> --experiment <id> --condition <guided|unguided> --accounts <path> [--count N] [--run-id id] [--baseline]"
+      "Usage: cli --config <path> --experiment <id> --condition <guided|unguided> --accounts <path> [--count N] [--run-id id] [--baseline] [--record video|trace|both] [--population-seed <run-id>]"
     );
     process.exit(1);
   }
@@ -54,8 +66,18 @@ async function main() {
   const accounts: SyntheticAccount[] = JSON.parse(await readFile(values.accounts, "utf8"));
   const count = parseInt(values.count!, 10);
   const runId = values["run-id"] ?? randomUUID();
+  const record = values.record ?? "off";
+  if (!["off", "video", "trace", "both"].includes(record)) {
+    throw new Error(`--record must be video, trace or both (got "${record}").`);
+  }
+  const recordVideo = record === "video" || record === "both";
+  const recordTrace = record === "trace" || record === "both";
+  const recordingDir = `${config.outputDir}/${runId}`;
+  if (record !== "off") await mkdir(recordingDir, { recursive: true });
 
-  const population = buildPopulation(runId, count, values.baseline!);
+  const populationSeed = values["population-seed"] ?? runId;
+  const population = buildPopulation(runId, populationSeed, count, values.baseline!);
+  if (populationSeed !== runId) console.log(`population re-drawn from seed "${populationSeed}"`);
   if (population.length > accounts.length) {
     throw new Error(
       `Population needs ${population.length} accounts, only ${accounts.length} provided.`
@@ -71,7 +93,12 @@ async function main() {
       await recorder.init();
 
       console.log(`[${i + 1}/${population.length}] agent ${agentId} (${values.condition})`);
-      const context = await browser.newContext({ baseURL: config.baseUrl });
+      const context = await browser.newContext({
+        baseURL: config.baseUrl,
+        viewport: { width: 1280, height: 800 },
+        ...(recordVideo ? { recordVideo: { dir: recordingDir, size: { width: 1280, height: 800 } } } : {}),
+      });
+      if (recordTrace) await context.tracing.start({ screenshots: true, snapshots: true });
       const page = await context.newPage();
       try {
         await runAgent({
@@ -89,7 +116,16 @@ async function main() {
       } catch (err) {
         console.error(`Agent ${agentId} failed:`, err);
       } finally {
+        if (recordTrace) {
+          await context.tracing.stop({ path: `${recordingDir}/${agentId}.trace.zip` }).catch(() => {});
+        }
+        const video = recordVideo ? page.video() : null;
         await context.close();
+        if (video) {
+          // Playwright names the file by an internal id; rename to the agent.
+          const tmp = await video.path().catch(() => null);
+          if (tmp) await rename(tmp, `${recordingDir}/${agentId}.webm`).catch(() => {});
+        }
       }
     }
   } finally {
@@ -101,6 +137,7 @@ async function main() {
 
 function buildPopulation(
   runId: string,
+  populationSeed: string,
   count: number,
   includeBaseline: boolean
 ): { agentId: string; params: AgentParameters }[] {
@@ -114,7 +151,10 @@ function buildPopulation(
 
   for (let i = 0; i < count; i++) {
     const agentId = `${runId}-agent-${i}`;
-    const rng = rngForAgent(runId, agentId);
+    // Parameters come from the population seed (so they can be reused
+    // across runs); the per-step decision RNG in runAgent stays keyed to
+    // the real run id.
+    const rng = rngForAgent(populationSeed, `${populationSeed}-agent-${i}`);
     const params: AgentParameters = {};
     for (const name of PARAM_NAMES) params[name] = uniform(rng, 0, 1);
     population.push({ agentId, params });
