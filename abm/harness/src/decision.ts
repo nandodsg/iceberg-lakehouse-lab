@@ -115,6 +115,11 @@ const GOAL_MAX_AGE = 6;
 // necessary in 2026-09-16 (Item 4 of this epic): agents got stuck
 // clicking a submit that failed invisible server-side validation, up to
 // hundreds of times in one run. Initial values, uncalibrated.
+// The memory is keyed by container + visible text (memoryKey below), not
+// by the positional `ref`: a control that appears or disappears earlier
+// in the same dialog (a suggestion list, say) shifts every later `ref`,
+// and the count would slide onto a different control. Text in the same
+// container is what a human recognizes as "the same button".
 const NO_EFFECT_DECAY = 0.5;
 const FRUSTRATION_STEPS = 4;
 const FRUSTRATION_DISMISS_WEIGHT = 1.0;
@@ -125,6 +130,16 @@ const ABANDON_FRUSTRATION_WEIGHT = 2.0;
 // like sign-out is only ever offered as `abandon_logout`, never as
 // click/explore: pressing it IS leaving, whatever the agent "meant".
 export const LOGOUT_TEXT_PATTERN = /\b(log ?out|sign ?out|sair|encerrar sess[ãa]o)\b/i;
+
+/** Key under which a control's no-effect memory is kept (see NO_EFFECT_DECAY). */
+export function memoryKey(el: PerceivedElement): string {
+  return `${el.inDialog ? "d" : "p"}|${el.text}`;
+}
+
+/** Whether a control reads as close/cancel — the way out of a dialog a human gives up on. */
+export function isDismissControl(el: PerceivedElement): boolean {
+  return DISMISS_TEXT_PATTERN.test(el.text);
+}
 
 interface Option {
   action: Action;
@@ -213,7 +228,7 @@ export function decide(ctx: DecisionContext): DecisionResult {
     // effect (see DecisionContext.noEffectCounts) make it progressively
     // less credible as progress and less salient — "I pressed it and
     // nothing happened" — before any goal coherence or caution is applied.
-    const noEffectN = noEffectCounts.get(el.ref) ?? 0;
+    const noEffectN = noEffectCounts.get(memoryKey(el)) ?? 0;
     const noEffectFactor = noEffectN > 0 ? Math.pow(pol.noEffectDecay, noEffectN) : 1;
 
     const salience = computeSalience(el);

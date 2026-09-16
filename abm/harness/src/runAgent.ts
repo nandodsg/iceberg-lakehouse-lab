@@ -10,7 +10,7 @@ import type {
   SyntheticAccount,
 } from "./types.js";
 import { perceive } from "./perception.js";
-import { decide } from "./decision.js";
+import { decide, isDismissControl, memoryKey } from "./decision.js";
 import { act } from "./actuation.js";
 import { Recorder } from "./recorder.js";
 import { rngForAgent } from "./rng.js";
@@ -44,13 +44,19 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
   let lastScreen = "";
   let goal: GoalState = null;
   // Action-outcome mechanism (definition.md, "Action outcome") — see
-  // computeStateKey below. Cleared whenever the fingerprint changes;
-  // otherwise accumulates per-ref counts of click/navigate attempts that
-  // produced no observable effect.
+  // computeStateKey below. Accumulates per-control counts (memoryKey) of
+  // click/navigate attempts that produced no observable effect. Scoped by
+  // container, not by fingerprint: dialog-level memory ("d|…") lives as
+  // long as that dialog is open, page-level memory ("p|…") as long as the
+  // pathname holds. When the agent closes a dialog it had been failing in,
+  // the failures are carried onto the control that opened it.
   const noEffectCounts = new Map<string, number>();
   let prevStateKey: string | null = null;
+  let prevPathname: string | null = null;
+  let prevDialogOpen = false;
   let prevAction: Action | null = null;
-  let prevTargetRef: string | null = null;
+  let prevTarget: PerceivedElement | null = null;
+  let openerKey: string | null = null;
   const exclude = config.excludeElementPattern ? new RegExp(config.excludeElementPattern, "i") : undefined;
   let terminalRecorded = false;
   let actFailures = 0;
@@ -90,22 +96,50 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     // Did the previous step's action change anything observable? Compared
     // against the fingerprint taken right before that action (this same
     // computation, one iteration ago). A match on a click/navigate means
-    // that action had no effect; any mismatch means the world moved on and
-    // every accumulated no-effect count is stale.
-    const stateKeyNow = computeStateKey(page, candidates);
+    // that action had no effect. A mismatch by itself means nothing for
+    // the memory — typing in a field or a control appearing next to the
+    // button are not evidence that the button now works. Only leaving the
+    // container (the dialog closing, the pathname changing) retires it.
+    const pathnameNow = safePathname(page);
+    const dialogOpenNow = candidates.some((c) => c.inDialog);
+    const stateKeyNow = computeStateKey(pathnameNow, dialogOpenNow, candidates);
     if (prevStateKey !== null) {
       if (stateKeyNow === prevStateKey) {
-        if ((prevAction === "click" || prevAction === "navigate") && prevTargetRef) {
-          noEffectCounts.set(prevTargetRef, (noEffectCounts.get(prevTargetRef) ?? 0) + 1);
+        if ((prevAction === "click" || prevAction === "navigate") && prevTarget) {
+          const key = memoryKey(prevTarget);
+          noEffectCounts.set(key, (noEffectCounts.get(key) ?? 0) + 1);
         }
-      } else {
+      }
+      if (pathnameNow !== prevPathname) {
+        // New screen, new forms: nothing learned here carries over.
         noEffectCounts.clear();
+      } else if (dialogOpenNow && !prevDialogOpen) {
+        // A dialog just opened — remember what opened it; its own memory
+        // starts fresh (page-level memory stays, it is still that page).
+        openerKey = prevTarget ? memoryKey(prevTarget) : null;
+        clearDialogMemory(noEffectCounts);
+      } else if (!dialogOpenNow && prevDialogOpen) {
+        // The dialog closed. If the agent closed it itself after failing
+        // in it, the failures move onto whatever opened it — "I tried that
+        // form n times and gave up" — so reopening it stops looking like
+        // progress. A dialog that closed any other way (submit accepted,
+        // nothing had failed) takes its memory with it.
+        const gaveUp = prevAction !== "type" && prevTarget !== null && isDismissControl(prevTarget);
+        let failed = 0;
+        for (const [k, n] of noEffectCounts) if (k.startsWith("d|")) failed += n;
+        clearDialogMemory(noEffectCounts);
+        if (gaveUp && failed > 0 && openerKey) {
+          noEffectCounts.set(openerKey, (noEffectCounts.get(openerKey) ?? 0) + failed);
+        }
+        openerKey = null;
       }
     }
+    prevPathname = pathnameNow;
+    prevDialogOpen = dialogOpenNow;
 
     // Screen-level memory: count arrivals, not steps — staying on a screen
     // for 20 steps is one visit.
-    const screenNow = safePathname(page);
+    const screenNow = pathnameNow;
     const screenChanged = screenNow !== lastScreen;
     if (screenChanged) {
       screenVisitCounts.set(screenNow, (screenVisitCounts.get(screenNow) ?? 0) + 1);
@@ -127,7 +161,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     goal = result.nextGoal;
     prevStateKey = stateKeyNow;
     prevAction = result.action;
-    prevTargetRef = result.target?.ref ?? null;
+    prevTarget = result.target ?? null;
 
     await recorder.record(
       buildEvent({
@@ -185,10 +219,14 @@ const DWELL_MAX_MS = 1600;
  * click/navigate) produced no observable effect — see noEffectCounts
  * above and DecisionContext.noEffectCounts.
  */
-function computeStateKey(page: Page, candidates: PerceivedElement[]): string {
-  const dialogOpen = candidates.some((c) => c.inDialog) ? "1" : "0";
+function computeStateKey(pathname: string, dialogOpen: boolean, candidates: PerceivedElement[]): string {
   const parts = candidates.map((c) => `${c.ref}|${c.text}|${c.filled ? "1" : "0"}`).sort();
-  return `${safePathname(page)}|${dialogOpen}|${parts.join("~")}`;
+  return `${pathname}|${dialogOpen ? "1" : "0"}|${parts.join("~")}`;
+}
+
+/** Drops the dialog-scoped ("d|…") no-effect memory, keeping the page-scoped ("p|…") part. */
+function clearDialogMemory(counts: Map<string, number>): void {
+  for (const k of [...counts.keys()]) if (k.startsWith("d|")) counts.delete(k);
 }
 
 function safePathname(page: Page): string {

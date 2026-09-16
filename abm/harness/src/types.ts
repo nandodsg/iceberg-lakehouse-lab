@@ -129,13 +129,17 @@ export interface DecisionContext {
   /** The goal carried over from the previous step, or null. See GoalState. */
   goal: GoalState;
   /**
-   * Per-`ref` count of consecutive click/navigate attempts on that control
-   * that produced no observable change in state (see runAgent.ts — a
+   * Per-control count of click/navigate attempts on that control that
+   * produced no observable change in state (see runAgent.ts — a
    * fingerprint of pathname + dialog-open + candidate set/fill state,
-   * compared step to step). Cleared entirely whenever the state does
-   * change, so it only ever holds refs still valid on the current
-   * candidate set. decide() stays a pure function of its inputs; the
-   * fingerprinting and clearing logic lives in runAgent.
+   * compared step to step). Keyed by decision.ts's memoryKey (container +
+   * text, not the positional `ref`). Scoped to the container that
+   * produced it: dialog-level memory is dropped when that dialog closes
+   * (carried onto the control that opened it when the agent closed it in
+   * frustration), page-level memory when the pathname changes. Typing in
+   * a field or a control appearing/disappearing within the same container
+   * does NOT reset it. decide() stays a pure function of its inputs; the
+   * fingerprinting and scoping logic lives in runAgent.
    */
   noEffectCounts: Map<string, number>;
   policy?: PolicyOverrides;

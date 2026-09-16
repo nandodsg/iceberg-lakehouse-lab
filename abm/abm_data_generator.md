@@ -272,7 +272,10 @@ when an action changed nothing observable at all — a control that keeps
 failing silently progressively loses credibility as "the way forward" and
 raises a general frustration that can push the agent to abandon the form
 or the run, the same way a human stops pressing a button that never
-responds, without ever reading why.
+responds, without ever reading why. That memory lasts as long as the
+place that produced it (the open form, the current screen) — filling
+another field does not make the button credible again, and giving up on
+a form makes the way back into it less attractive too.
 
 The model should avoid hard-coding the expected journey.
 

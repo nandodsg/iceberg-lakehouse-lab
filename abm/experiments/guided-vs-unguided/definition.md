@@ -235,15 +235,38 @@ all of that matches.
 
 **No-effect detection**: after a `click` or `navigate` action, if the next
 step's observable state is unchanged, that action produced no effect —
-recorded as a per-control count (keyed by the control, not the action)
-that keeps incrementing across consecutive attempts on the same control.
-Any change in observable state — a different screen, a dialog opening or
-closing, a field newly filled, any control's text changing — clears every
-count back to zero: the agent's memory of "this doesn't work" is scoped to
-the situation that produced it, not carried forever. `type` and `explore`
-landing on a form field are excluded by construction, not by a special
-case: filling a field changes its filled state, so the observable state
-already differs.
+recorded as a per-control count that keeps incrementing across attempts on
+the same control. The control is identified by its container (inside the
+open dialog, or on the page) plus its visible text — not by its position
+among the perceived controls, which shifts whenever something appears or
+disappears earlier in the same container. `type` and `explore` landing on
+a form field are excluded by construction, not by a special case: filling
+a field changes its filled state, so the observable state already differs.
+
+**Memory scope** (revised 2026-09-16 — the first version cleared every
+count on *any* change in observable state, and the traces showed why that
+is too eager: an agent alternating submit → type in a field → submit had
+its memory wiped by every `type`, and an agent that closed the dialog and
+reopened it started from zero each time; both loops ran until the session
+timed out). The memory of "this doesn't work" now lives as long as the
+container that produced it:
+
+- **Dialog-level memory** (controls inside an open dialog) is kept while
+  that dialog stays open — filling a field next to the button, or a
+  control appearing or disappearing inside the dialog, is not evidence
+  that the button now works. It is dropped when the dialog closes.
+- **Closing a dialog in frustration carries the memory out.** If the agent
+  itself closed the dialog with a close/cancel-worded control after
+  failing in it, the sum of the failures inside is added to the count of
+  the control that *opened* that dialog: "I tried that form n times and
+  gave up" — reopening it stops looking like progress, at the same
+  per-attempt decay as any other unresponsive control. A dialog that
+  closed any other way (submit accepted, or nothing had failed in it)
+  takes its memory with it.
+- **Page-level memory** (controls outside any dialog, including what was
+  carried out of a dialog) is kept while the pathname holds, and dropped
+  when the screen changes: new screen, new forms, nothing learned here
+  carries over.
 
 This is deliberately about **state, not text** — perceiving an error
 message (`[role="alert"]`, `aria-invalid`, or a visual heuristic for
