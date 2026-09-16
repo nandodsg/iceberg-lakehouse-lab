@@ -56,6 +56,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
   let prevDialogOpen = false;
   let prevAction: Action | null = null;
   let prevTarget: PerceivedElement | null = null;
+  let prevRequiredEmpty = 0;
   let openerKey: string | null = null;
   const exclude = config.excludeElementPattern ? new RegExp(config.excludeElementPattern, "i") : undefined;
   let terminalRecorded = false;
@@ -108,7 +109,14 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     const stateKeyNow = computeStateKey(pathnameNow, dialogOpenNow, candidates);
     if (prevStateKey !== null) {
       if (stateKeyNow === prevStateKey) {
-        if (prevTarget) {
+        // A submit pressed while required fields were visibly empty is not
+        // evidence about the submit: the form itself says what was
+        // missing, and decide() already gives such a press no progress.
+        // Counting it would discredit the button before the form is even
+        // filled (seen in the Item 7 batches: two premature presses, then
+        // the filled form was never submitted).
+        const premature = prevTarget?.isSubmit && prevRequiredEmpty > 0;
+        if (prevTarget && !premature) {
           const key = memoryKey(prevTarget);
           noEffectCounts.set(key, (noEffectCounts.get(key) ?? 0) + 1);
         }
@@ -165,6 +173,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     prevStateKey = stateKeyNow;
     prevAction = result.action;
     prevTarget = result.target ?? null;
+    prevRequiredEmpty = candidates.filter((c) => c.isFormField && c.required && !c.filled).length;
 
     await recorder.record(
       buildEvent({

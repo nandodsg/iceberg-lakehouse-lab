@@ -247,6 +247,12 @@ filled is not excluded — nothing a human would notice changed, and it
 counts like any other attempt that went nowhere (the first version only
 counted `click`/`navigate`; traces then showed agents re-typing the same
 three filled fields thirty steps in a row with no frustration building).
+One deliberate exception: a submit pressed while required fields are
+visibly empty does not count. The form itself shows what was missing —
+that press says nothing about whether the button works — and the utility
+side already treats such a press as no progress. Without the exception,
+memory that now persists discredited submit buttons before the form was
+even filled (two premature presses, then the filled form never submitted).
 
 **Memory scope** (revised 2026-09-16 — the first version cleared every
 count on *any* change in observable state, and the traces showed why that
