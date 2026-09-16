@@ -95,9 +95,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
 
     // Did the previous step's action change anything observable? Compared
     // against the fingerprint taken right before that action (this same
-    // computation, one iteration ago). A match on a click/navigate means
-    // that action had no effect. A mismatch by itself means nothing for
-    // the memory — typing in a field or a control appearing next to the
+    // computation, one iteration ago). A match after any targeted action
+    // means that action had no effect — a click that did nothing, a
+    // navigate that went nowhere, a value typed into a field that was
+    // already filled (filling an empty one flips its filled state, so
+    // that never matches). A mismatch by itself means nothing for the
+    // memory — typing in a field or a control appearing next to the
     // button are not evidence that the button now works. Only leaving the
     // container (the dialog closing, the pathname changing) retires it.
     const pathnameNow = safePathname(page);
@@ -105,7 +108,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     const stateKeyNow = computeStateKey(pathnameNow, dialogOpenNow, candidates);
     if (prevStateKey !== null) {
       if (stateKeyNow === prevStateKey) {
-        if ((prevAction === "click" || prevAction === "navigate") && prevTarget) {
+        if (prevTarget) {
           const key = memoryKey(prevTarget);
           noEffectCounts.set(key, (noEffectCounts.get(key) ?? 0) + 1);
         }

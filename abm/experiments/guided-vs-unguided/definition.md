@@ -233,15 +233,20 @@ whether a dialog is open, and the ordered set of perceived
 controls with their text and filled state. Two states are "the same" if
 all of that matches.
 
-**No-effect detection**: after a `click` or `navigate` action, if the next
-step's observable state is unchanged, that action produced no effect —
-recorded as a per-control count that keeps incrementing across attempts on
-the same control. The control is identified by its container (inside the
-open dialog, or on the page) plus its visible text — not by its position
-among the perceived controls, which shifts whenever something appears or
-disappears earlier in the same container. `type` and `explore` landing on
-a form field are excluded by construction, not by a special case: filling
-a field changes its filled state, so the observable state already differs.
+**No-effect detection**: after any action with a target (`click`,
+`navigate`, `type`, `explore`), if the next step's observable state is
+unchanged, that action produced no effect — recorded as a per-control
+count that keeps incrementing across attempts on the same control. The
+control is identified by its container (inside the open dialog, or on the
+page) plus its visible text — not by its position among the perceived
+controls, which shifts whenever something appears or disappears earlier in
+the same container. Filling an *empty* field is excluded by construction,
+not by a special case: it flips the field's filled state, so the
+observable state already differs. Typing into a field that is already
+filled is not excluded — nothing a human would notice changed, and it
+counts like any other attempt that went nowhere (the first version only
+counted `click`/`navigate`; traces then showed agents re-typing the same
+three filled fields thirty steps in a row with no frustration building).
 
 **Memory scope** (revised 2026-09-16 — the first version cleared every
 count on *any* change in observable state, and the traces showed why that

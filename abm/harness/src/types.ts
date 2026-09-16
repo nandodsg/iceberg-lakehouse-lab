@@ -129,8 +129,9 @@ export interface DecisionContext {
   /** The goal carried over from the previous step, or null. See GoalState. */
   goal: GoalState;
   /**
-   * Per-control count of click/navigate attempts on that control that
-   * produced no observable change in state (see runAgent.ts — a
+   * Per-control count of targeted actions (click, navigate, type,
+   * explore) on that control that produced no observable change in state
+   * (see runAgent.ts — a
    * fingerprint of pathname + dialog-open + candidate set/fill state,
    * compared step to step). Keyed by decision.ts's memoryKey (container +
    * text, not the positional `ref`). Scoped to the container that
