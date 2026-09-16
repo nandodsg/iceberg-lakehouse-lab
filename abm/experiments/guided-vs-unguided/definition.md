@@ -8,10 +8,12 @@ This document is what that contract's free-form fields
 (`agent_parameters`, `condition`, `journey_stage`, `decision_signals`)
 resolve against for this experiment specifically.
 
-Status: **draft, not yet run.** Research question and hypothesis (H1) are
-defined in [`abm_data_generator.md`](../../abm_data_generator.md) §3-4 —
-not repeated here, this document only adds the concrete configuration
-needed to actually execute it.
+Status: **mechanism validated under `guided` (replicated pilot runs);
+the H1 comparison itself has not been run yet.** Research question and
+hypothesis (H1) are defined in
+[`abm_data_generator.md`](../../abm_data_generator.md) §3-4 — not
+repeated here, this document only adds the concrete configuration needed
+to actually execute it.
 
 ## Entry point
 
@@ -70,8 +72,9 @@ already handles; it is not recorded as a distinct action value.
 
 ## Journey and journey_stage vocabulary
 
-Company → Team → Member, 10-minute completion window
-(`abm_data_generator.md` §3). Valid `journey_stage` values for this
+Company → Team → Member, within the completion window (10 minutes by
+design, `abm_data_generator.md` §3; 5 minutes in this execution — see
+"Execution configuration"). Valid `journey_stage` values for this
 experiment: `none`, `company`, `team`, `member` — furthest stage reached,
 not necessarily sequential (an agent may attempt Team before Company
 succeeds, depending on condition/behavior).
@@ -79,10 +82,21 @@ succeeds, depending on condition/behavior).
 ## condition vocabulary
 
 Two values for this experiment: `guided`, `unguided` (`abm_data_generator.md`
-§5). **`unguided` cannot run yet** — blocked on matriz-senioridade's native
-A/B testing capability becoming available in STG. This experiment
-definition covers both conditions so it's ready the moment that
-dependency clears — it does not mean both run now.
+§5). Both can run: the target application's native A/B mechanism is in
+place (AGENTS.md, "Decisions settled for the ABM", 1).
+
+`experiment_id` and `condition` are the Lab's identifiers. The key under
+which the target application knows this experiment, and the names it
+gives the two variants, are details of the integration module — it
+translates on the way in (when it provisions each agent's account and
+assigns its variant) and the harness never sees them. The `condition`
+value the harness writes is therefore a **label**, not evidence: the
+integration module must also verify, before and after every batch, that
+the condition each agent actually experienced — as the target itself
+recorded it — matches the label in the event stream. A batch where the
+two disagree for any agent is invalid, not noisy. (The `guided`-only
+pilots never depended on this: without an active assignment the target
+serves its default flow, which is the control.)
 
 ## agent_parameters — the 6 parameters, their range, and how they're sampled
 
@@ -328,15 +342,15 @@ no principled derivation yet.
 Two different scales, don't conflate them:
 
 - **Full eventual H1 comparison** (condition-comparison check,
-  `abm_data_generator.md` §16 — `unguided` availability is an external
-  dependency on the target application, tracked outside this document):
-  **30 agents per condition (60 total)**, each independently
+  `abm_data_generator.md` §16): **30 agents per condition (60 total)**,
+  each independently
   sampled per the distribution above. Not a statistically powered sample
   size — this project explicitly disclaims rigorous causal conclusions
   (`abm_data_generator.md` §4) — just enough repetition to see whether a
   pattern holds, per the spirit of §16.
 - **Initial small-scale pilot** (mechanism validation, not H1 testing):
-  **5-10 agents, `guided` only** (the only condition available today) plus
+  **5-10 agents, `guided` only** (one condition is enough to validate the
+  mechanism; the comparison is what needs both) plus
   the 1 baseline agent. Purpose is confirming the harness produces real,
   sensible, varied traces end-to-end — not testing the hypothesis.
 
@@ -349,7 +363,18 @@ changes every run and isn't an experiment-design decision.
 
 ## Execution configuration
 
-- Timeout: 10 minutes per agent (`abm_data_generator.md` §3).
+- Timeout: **5 minutes per agent in this execution (v1) — measured, not
+  designed.** The design value (`abm_data_generator.md` §3, and the
+  "10-minute" references elsewhere in this document) is 10 minutes;
+  replicated pilot runs of the same population at both windows showed
+  that doubling it barely moved completion (one extra completion across
+  three replicates, an agent that finished just under 6 minutes) while
+  the agents that did not complete spent the extra time going in circles
+  — the loop diagnostics got worse, not better. Completion in this
+  mechanism is decided early or not at all, so every v1 replicate, in
+  both conditions, runs with the same 5-minute window. A later version
+  may revisit the window; within v1 it does not change between
+  conditions or replicates.
 - One synthetic account/company per agent, never reused across runs
   (policy already decided — see AGENTS.md, "Decisions settled for the
   ABM").
