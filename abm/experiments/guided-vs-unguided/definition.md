@@ -218,6 +218,71 @@ blocking the next `area` goal, and — once detection works — the current
 screen's own navigation item would have been the only "progress" on an
 empty screen.
 
+## Action outcome
+
+Found necessary in 2026-09-16, reading traces from the runs above: none of
+the perception, goal, or utility machinery above knows whether an action
+actually *worked*. A submit that silently fails (invalid input rejected by
+the target, a required selection never made) is indistinguishable, to
+everything above, from one that succeeded — the same control stays the
+highest-utility option next step, and stays that way indefinitely. Agents
+were observed clicking one submit control 100+ times in a single run.
+
+**Observable state**, for this purpose: the current screen (pathname),
+whether a dialog is open, and the ordered set of perceived
+controls with their text and filled state. Two states are "the same" if
+all of that matches.
+
+**No-effect detection**: after a `click` or `navigate` action, if the next
+step's observable state is unchanged, that action produced no effect —
+recorded as a per-control count (keyed by the control, not the action)
+that keeps incrementing across consecutive attempts on the same control.
+Any change in observable state — a different screen, a dialog opening or
+closing, a field newly filled, any control's text changing — clears every
+count back to zero: the agent's memory of "this doesn't work" is scoped to
+the situation that produced it, not carried forever. `type` and `explore`
+landing on a form field are excluded by construction, not by a special
+case: filling a field changes its filled state, so the observable state
+already differs.
+
+This is deliberately about **state, not text** — perceiving an error
+message (`[role="alert"]`, `aria-invalid`, or a visual heuristic for
+freshly-appeared red text) was considered and set aside: it would require
+either an ARIA convention the target application may not follow, or a
+heuristic arbitrary enough to defeat the point of a generic harness. A
+human who presses a button and sees literally nothing happen stops
+pressing it without ever having read why — that is the prior this
+mechanism encodes, nothing more.
+
+**Effects on utility**, both scaled by the repeated-attempt count on the
+specific control in question:
+
+- A control's progress signal and attention both decay by
+  `NO_EFFECT_DECAY` per accumulated no-effect attempt on it — it stops
+  looking like progress and stops standing out, at the same rate.
+- **Frustration**, a run-wide (not per-control) signal:
+  `min(1, (sum of all current no-effect counts) / FRUSTRATION_STEPS)`. A
+  human stuck in a form doesn't credit one specific click for the
+  frustration; anything stuck counts. It adds directly to the utility of
+  a close/cancel-worded control inside the open dialog (letting frustration
+  eventually overcome the existing `dismissWhileIncompleteFactor`
+  resistance to leaving an incomplete form — the two forces are meant to
+  oppose each other and one should be able to win), and to abandon
+  utility, in the same additive form the time-pressure term already uses.
+
+`NO_EFFECT_DECAY`, `FRUSTRATION_STEPS`, `FRUSTRATION_DISMISS_WEIGHT` and
+`ABANDON_FRUSTRATION_WEIGHT` are constants to calibrate empirically, same
+status as the goal-state constants above — conservative starting values,
+no principled derivation yet.
+
+**`decision_signals` vocabulary** for this mechanism — diagnostic only,
+`required: false`, does not change the contract:
+
+| Signal | Meaning |
+|---|---|
+| `no_effect` | the chosen action's target's current no-effect count (0 if the target has never failed to change state, or the action has no target) |
+| `frustration` | the run-wide frustration value this step, in `[0, 1]` |
+
 ## Population size
 
 Two different scales, don't conflate them:

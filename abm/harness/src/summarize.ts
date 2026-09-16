@@ -80,6 +80,8 @@ for (const [agentId, ev] of byAgent) {
     if (goalNow !== 0 && prevGoal === 0) reasons.push(`goal set (${GOAL_NAMES[goalNow] ?? goalNow})`);
     if (goalNow === 0 && prevGoal !== 0) reasons.push("goal dropped");
     prevGoal = goalNow;
+    const noEffect = Number(e.decision_signals?.no_effect ?? 0);
+    if (noEffect >= 2) reasons.push(`no-effect click ×${noEffect}`);
     prevScreen = e.screen;
     prevStage = e.journey_stage;
     if (!values.all && reasons.length === 0) return;

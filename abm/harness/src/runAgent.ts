@@ -1,10 +1,12 @@
 import type { Page } from "playwright";
 import type {
   AbmEvent,
+  Action,
   AgentParameters,
   GoalState,
   HarnessConfig,
   IntegrationModule,
+  PerceivedElement,
   SyntheticAccount,
 } from "./types.js";
 import { perceive } from "./perception.js";
@@ -41,6 +43,14 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
   const screenVisitCounts = new Map<string, number>();
   let lastScreen = "";
   let goal: GoalState = null;
+  // Action-outcome mechanism (definition.md, "Action outcome") — see
+  // computeStateKey below. Cleared whenever the fingerprint changes;
+  // otherwise accumulates per-ref counts of click/navigate attempts that
+  // produced no observable effect.
+  const noEffectCounts = new Map<string, number>();
+  let prevStateKey: string | null = null;
+  let prevAction: Action | null = null;
+  let prevTargetRef: string | null = null;
   const exclude = config.excludeElementPattern ? new RegExp(config.excludeElementPattern, "i") : undefined;
   let terminalRecorded = false;
   let actFailures = 0;
@@ -77,6 +87,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
     const candidates = await perceive(page, { visitedRefs, exclude });
     const { stage, completed } = await safeJourneyState(integration, page);
 
+    // Did the previous step's action change anything observable? Compared
+    // against the fingerprint taken right before that action (this same
+    // computation, one iteration ago). A match on a click/navigate means
+    // that action had no effect; any mismatch means the world moved on and
+    // every accumulated no-effect count is stale.
+    const stateKeyNow = computeStateKey(page, candidates);
+    if (prevStateKey !== null) {
+      if (stateKeyNow === prevStateKey) {
+        if ((prevAction === "click" || prevAction === "navigate") && prevTargetRef) {
+          noEffectCounts.set(prevTargetRef, (noEffectCounts.get(prevTargetRef) ?? 0) + 1);
+        }
+      } else {
+        noEffectCounts.clear();
+      }
+    }
+
     // Screen-level memory: count arrivals, not steps — staying on a screen
     // for 20 steps is one visit.
     const screenNow = safePathname(page);
@@ -95,9 +121,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
       screenVisits: (screenVisitCounts.get(screenNow) ?? 1) - 1,
       screenChanged,
       goal,
+      noEffectCounts,
       policy: config.policy,
     });
     goal = result.nextGoal;
+    prevStateKey = stateKeyNow;
+    prevAction = result.action;
+    prevTargetRef = result.target?.ref ?? null;
 
     await recorder.record(
       buildEvent({
@@ -144,6 +174,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
 
 const DWELL_MIN_MS = 400;
 const DWELL_MAX_MS = 1600;
+
+/**
+ * A fingerprint of everything about the page a human would notice: which
+ * screen, whether a dialog is open, and the ordered set of controls with
+ * their text and filled state. Not a cryptographic hash — a plain
+ * canonical string, since the only use is exact-match comparison one step
+ * apart, never storage or logging. Two consecutive fingerprints being
+ * equal is how runAgent tells that the last action (if it was a
+ * click/navigate) produced no observable effect — see noEffectCounts
+ * above and DecisionContext.noEffectCounts.
+ */
+function computeStateKey(page: Page, candidates: PerceivedElement[]): string {
+  const dialogOpen = candidates.some((c) => c.inDialog) ? "1" : "0";
+  const parts = candidates.map((c) => `${c.ref}|${c.text}|${c.filled ? "1" : "0"}`).sort();
+  return `${safePathname(page)}|${dialogOpen}|${parts.join("~")}`;
+}
 
 function safePathname(page: Page): string {
   try {

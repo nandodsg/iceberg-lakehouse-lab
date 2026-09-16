@@ -95,6 +95,14 @@ export interface PolicyOverrides {
   goalDropBase?: number;
   /** Steps after which an active goal expires regardless of `commitment`. */
   goalMaxAge?: number;
+  /** Per-repetition multiplier on a control's progress signal and attention once acting on it has produced no observable state change (see DecisionContext.noEffectCounts). */
+  noEffectDecay?: number;
+  /** Accumulated no-effect count at which `frustration` saturates to 1. */
+  frustrationSteps?: number;
+  /** Weight of `frustration` added directly to a dismiss/cancel control's utility inside a dialog. */
+  frustrationDismissWeight?: number;
+  /** Weight of `abandonmentPropensity × frustration` added to abandon utility, same form as the time-pressure term. */
+  abandonFrustrationWeight?: number;
 }
 
 /**
@@ -120,6 +128,16 @@ export interface DecisionContext {
   screenChanged: boolean;
   /** The goal carried over from the previous step, or null. See GoalState. */
   goal: GoalState;
+  /**
+   * Per-`ref` count of consecutive click/navigate attempts on that control
+   * that produced no observable change in state (see runAgent.ts — a
+   * fingerprint of pathname + dialog-open + candidate set/fill state,
+   * compared step to step). Cleared entirely whenever the state does
+   * change, so it only ever holds refs still valid on the current
+   * candidate set. decide() stays a pure function of its inputs; the
+   * fingerprinting and clearing logic lives in runAgent.
+   */
+  noEffectCounts: Map<string, number>;
   policy?: PolicyOverrides;
 }
 

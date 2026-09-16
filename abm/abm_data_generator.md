@@ -267,6 +267,13 @@ forcing a specific action. Concrete parameter ranges, sampling and the
 diagnostic signals this mechanism produces are experiment-specific — see
 `abm/experiments/guided-vs-unguided/definition.md`.
 
+Step 6 ("receives the resulting environmental feedback") includes noticing
+when an action changed nothing observable at all — a control that keeps
+failing silently progressively loses credibility as "the way forward" and
+raises a general frustration that can push the agent to abandon the form
+or the run, the same way a human stops pressing a button that never
+responds, without ever reading why.
+
 The model should avoid hard-coding the expected journey.
 
 In particular, the agent should not simply contain a rule equivalent to:

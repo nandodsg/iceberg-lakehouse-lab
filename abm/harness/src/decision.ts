@@ -104,6 +104,22 @@ const DISTRACTION_DAMPING = 0.5;
 const GOAL_DROP_BASE = 0.15;
 const GOAL_MAX_AGE = 6;
 
+// Action-outcome mechanism (guided-vs-unguided/definition.md, "Action
+// outcome"): the agent doesn't perceive success/failure directly (no error
+// text, no server response) — only whether the observable state changed
+// after acting. A control that produced no change across n consecutive
+// attempts is progressively less credible as "progress" and less salient;
+// enough of that, and the agent is more willing to abandon the dialog it's
+// stuck in, or the run entirely — same prior a human follows with an
+// unresponsive button, without ever reading why it didn't respond. Found
+// necessary in 2026-09-16 (Item 4 of this epic): agents got stuck
+// clicking a submit that failed invisible server-side validation, up to
+// hundreds of times in one run. Initial values, uncalibrated.
+const NO_EFFECT_DECAY = 0.5;
+const FRUSTRATION_STEPS = 4;
+const FRUSTRATION_DISMISS_WEIGHT = 1.0;
+const ABANDON_FRUSTRATION_WEIGHT = 2.0;
+
 // Common sign-out vocabulary across languages — a generic UI convention,
 // not knowledge specific to any one application. A control that reads
 // like sign-out is only ever offered as `abandon_logout`, never as
@@ -122,7 +138,7 @@ interface Option {
 }
 
 export function decide(ctx: DecisionContext): DecisionResult {
-  const { candidates, params, elapsedSeconds, timeoutSeconds, screenVisits } = ctx;
+  const { candidates, params, elapsedSeconds, timeoutSeconds, screenVisits, noEffectCounts } = ctx;
   const pol = {
     temperature: ctx.policy?.temperature ?? TEMPERATURE,
     filledFieldAttentionFactor: ctx.policy?.filledFieldAttentionFactor ?? FILLED_FIELD_ATTENTION_FACTOR,
@@ -134,6 +150,10 @@ export function decide(ctx: DecisionContext): DecisionResult {
     distractionDamping: ctx.policy?.distractionDamping ?? DISTRACTION_DAMPING,
     goalDropBase: ctx.policy?.goalDropBase ?? GOAL_DROP_BASE,
     goalMaxAge: ctx.policy?.goalMaxAge ?? GOAL_MAX_AGE,
+    noEffectDecay: ctx.policy?.noEffectDecay ?? NO_EFFECT_DECAY,
+    frustrationSteps: ctx.policy?.frustrationSteps ?? FRUSTRATION_STEPS,
+    frustrationDismissWeight: ctx.policy?.frustrationDismissWeight ?? FRUSTRATION_DISMISS_WEIGHT,
+    abandonFrustrationWeight: ctx.policy?.abandonFrustrationWeight ?? ABANDON_FRUSTRATION_WEIGHT,
   };
   const goalSeeking = params.goal_seeking ?? 0.5;
   const exploration = params.exploration ?? 0.5;
@@ -142,6 +162,16 @@ export function decide(ctx: DecisionContext): DecisionResult {
   const commitment = params.commitment ?? 0.5;
 
   const timePressure = computeTimePressure(elapsedSeconds, timeoutSeconds);
+
+  // Frustration: how much of the last few steps went nowhere, regardless
+  // of which control absorbed the attempts — a human stuck in a form
+  // doesn't credit one specific click, they get frustrated with the
+  // dialog as a whole. Saturates at 1 after `frustrationSteps` total
+  // no-effect attempts currently on record (cleared as soon as the state
+  // actually changes — see DecisionContext.noEffectCounts).
+  let totalNoEffect = 0;
+  for (const n of noEffectCounts.values()) totalNoEffect += n;
+  const frustration = Math.min(1, totalNoEffect / pol.frustrationSteps);
 
   // Goal transition, evaluated before any utility is computed — priority
   // order matches the experiment definition: a dialog opening always wins
@@ -179,9 +209,17 @@ export function decide(ctx: DecisionContext): DecisionResult {
 
   for (const el of candidates) {
     if (el === logoutTarget) continue;
+    // Repeated clicks/navigates on this exact control with no observable
+    // effect (see DecisionContext.noEffectCounts) make it progressively
+    // less credible as progress and less salient — "I pressed it and
+    // nothing happened" — before any goal coherence or caution is applied.
+    const noEffectN = noEffectCounts.get(el.ref) ?? 0;
+    const noEffectFactor = noEffectN > 0 ? Math.pow(pol.noEffectDecay, noEffectN) : 1;
+
     const salience = computeSalience(el);
-    const attention =
+    let attention =
       salience * visualSensitivity * (el.isFormField && el.filled ? pol.filledFieldAttentionFactor : 1);
+    attention *= noEffectFactor;
     let progressSignal = el.isPrimaryStyled ? 1 : 0;
     if (el.isFormField && el.required && !el.filled) progressSignal = Math.max(progressSignal, REQUIRED_FIELD_PROGRESS);
     if (el.isSubmit && requiredEmpty > 0) progressSignal = 0;
@@ -190,6 +228,7 @@ export function decide(ctx: DecisionContext): DecisionResult {
     // A link to the screen already shown is not progress, however it is
     // styled (see the experiment definition, "Goal state").
     if (el.selfLink) progressSignal = 0;
+    progressSignal *= noEffectFactor;
 
     // Generic hesitation/commitment priors (see constants above).
     let caution = 1;
@@ -212,6 +251,14 @@ export function decide(ctx: DecisionContext): DecisionResult {
     // goal_seeking-directed pull toward this element, now plus the active
     // goal's pull (§ above) when this element is coherent with it.
     let clickUtility = (attention + goalSeeking * progressSignal + goalPull) * caution;
+    // Frustration pushes toward giving up on THIS dialog specifically,
+    // independent of (and added after) the caution multiplier above — it
+    // is exactly the force meant to eventually overcome
+    // dismissWhileIncompleteFactor's resistance, not another thing
+    // suppressed by it.
+    if (el.inDialog && DISMISS_TEXT_PATTERN.test(el.text)) {
+      clickUtility += pol.frustrationDismissWeight * frustration;
+    }
     const directAction = classifyDirectAction(el);
     // Distraction resistance is `area`-only and navigate-only: leaving an
     // open dialog is already discouraged by dismissWhileIncompleteFactor
@@ -252,7 +299,8 @@ export function decide(ctx: DecisionContext): DecisionResult {
   const abandonUtility =
     ABANDON_BASE_UTILITY +
     ABANDON_PROPENSITY_WEIGHT * abandonmentPropensity +
-    ABANDON_PRESSURE_WEIGHT * abandonmentPropensity * timePressure;
+    ABANDON_PRESSURE_WEIGHT * abandonmentPropensity * timePressure +
+    pol.abandonFrustrationWeight * abandonmentPropensity * frustration;
   options.push({
     action: "abandon_idle",
     utility: abandonUtility,
@@ -297,6 +345,8 @@ export function decide(ctx: DecisionContext): DecisionResult {
       goal: goal ? (goal.kind === "dialog" ? 1 : 2) : 0,
       goal_age: goal?.age ?? 0,
       goal_pull: chosen.goalPull ?? 0,
+      no_effect: chosen.target ? noEffectCounts.get(chosen.target.ref) ?? 0 : 0,
+      frustration,
     },
     nextGoal,
   };
