@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename } from "node:fs/promises";
-import { chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { loadConfig, loadIntegrationModule } from "./config.js";
 import { runAgent } from "./runAgent.js";
 import { Recorder } from "./recorder.js";
@@ -99,6 +99,13 @@ async function main() {
   const concurrency = Math.max(1, parseInt(values.concurrency!, 10) || 1);
   const browser = await chromium.launch();
   try {
+    // Headless Chromium announces itself as "HeadlessChrome/…" and web
+    // analytics bot filters drop those hits silently (the browser still
+    // sends them). Agents are meant to be seen by the app's analytics
+    // exactly like a human session, so present the browser's own UA with
+    // the headless marker removed — nothing else about the UA is faked.
+    const userAgent = await browserUserAgent(browser);
+
     // One shared recorder: each event is a single appendFile() of one
     // line, which the OS applies atomically in append mode — concurrent
     // agents interleave lines, never bytes.
@@ -112,6 +119,7 @@ async function main() {
       console.log(`[${i + 1}/${population.length}] agent ${agentId} (${values.condition}) started`);
       const context = await browser.newContext({
         baseURL: config.baseUrl,
+        userAgent,
         viewport: { width: 1280, height: 800 },
         ...(recordVideo ? { recordVideo: { dir: recordingDir, size: { width: 1280, height: 800 } } } : {}),
       });
@@ -195,3 +203,14 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
+async function browserUserAgent(browser: Browser): Promise<string> {
+  const probe = await browser.newContext();
+  try {
+    const page = await probe.newPage();
+    const ua = await page.evaluate(() => navigator.userAgent);
+    return ua.replace("HeadlessChrome/", "Chrome/");
+  } finally {
+    await probe.close();
+  }
+}
