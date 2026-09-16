@@ -360,7 +360,7 @@ export function decide(ctx: DecisionContext): DecisionResult {
       goal: goal ? (goal.kind === "dialog" ? 1 : 2) : 0,
       goal_age: goal?.age ?? 0,
       goal_pull: chosen.goalPull ?? 0,
-      no_effect: chosen.target ? noEffectCounts.get(chosen.target.ref) ?? 0 : 0,
+      no_effect: chosen.target ? noEffectCounts.get(memoryKey(chosen.target)) ?? 0 : 0,
       frustration,
     },
     nextGoal,
