@@ -283,15 +283,21 @@ specific control in question:
 - A control's progress signal and attention both decay by
   `NO_EFFECT_DECAY` per accumulated no-effect attempt on it — it stops
   looking like progress and stops standing out, at the same rate.
-- **Frustration**, a run-wide (not per-control) signal:
-  `min(1, (sum of all current no-effect counts) / FRUSTRATION_STEPS)`. A
-  human stuck in a form doesn't credit one specific click for the
-  frustration; anything stuck counts. It adds directly to the utility of
-  a close/cancel-worded control inside the open dialog (letting frustration
-  eventually overcome the existing `dismissWhileIncompleteFactor`
-  resistance to leaving an incomplete form — the two forces are meant to
-  oppose each other and one should be able to win), and to abandon
-  utility, in the same additive form the time-pressure term already uses.
+- **Frustration**, a per-container (not per-control) signal:
+  `min(1, (sum of the no-effect counts in the current container) /
+  FRUSTRATION_STEPS)` — the open dialog's counts when a dialog is open,
+  the page's otherwise (including what was carried out of a dialog the
+  agent gave up on). A human stuck in a form doesn't credit one specific
+  click for the frustration; anything stuck *in that form* counts — but
+  what went nowhere on the page behind it does not pre-load the form
+  (the first scoping, run-wide, did exactly that once memory started
+  persisting: forms were dismissed the moment they opened). It adds
+  directly to the utility of a close/cancel-worded control inside the
+  open dialog (letting frustration eventually overcome the existing
+  `dismissWhileIncompleteFactor` resistance to leaving an incomplete form
+  — the two forces are meant to oppose each other and one should be able
+  to win), and to abandon utility, in the same additive form the
+  time-pressure term already uses.
 
 `NO_EFFECT_DECAY`, `FRUSTRATION_STEPS`, `FRUSTRATION_DISMISS_WEIGHT` and
 `ABANDON_FRUSTRATION_WEIGHT` are constants to calibrate empirically, same
@@ -304,7 +310,7 @@ no principled derivation yet.
 | Signal | Meaning |
 |---|---|
 | `no_effect` | the chosen action's target's current no-effect count (0 if the target has never failed to change state, or the action has no target) |
-| `frustration` | the run-wide frustration value this step, in `[0, 1]` |
+| `frustration` | the current container's frustration value this step, in `[0, 1]` |
 
 ## Population size
 

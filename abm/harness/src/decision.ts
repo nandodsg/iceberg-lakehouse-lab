@@ -178,14 +178,24 @@ export function decide(ctx: DecisionContext): DecisionResult {
 
   const timePressure = computeTimePressure(elapsedSeconds, timeoutSeconds);
 
-  // Frustration: how much of the last few steps went nowhere, regardless
-  // of which control absorbed the attempts — a human stuck in a form
-  // doesn't credit one specific click, they get frustrated with the
-  // dialog as a whole. Saturates at 1 after `frustrationSteps` total
-  // no-effect attempts currently on record (cleared as soon as the state
-  // actually changes — see DecisionContext.noEffectCounts).
+  const dialogOpen = candidates.some((c) => c.inDialog);
+
+  // Frustration: how much of what the agent has tried WHERE IT IS NOW
+  // went nowhere, regardless of which control absorbed the attempts — a
+  // human stuck in a form doesn't credit one specific click, they get
+  // frustrated with the dialog as a whole. Scoped to the current
+  // container: inside an open dialog only that dialog's failures count
+  // (what pushes toward closing it); on the page only page-level ones
+  // (including what was carried out of a dialog the agent gave up on —
+  // what pushes toward leaving). Memory persists per container (see
+  // DecisionContext.noEffectCounts), so without this scoping a page's
+  // accumulated dud clicks would pre-load frustration into every dialog
+  // opened from it and get forms dismissed the moment they open — seen in
+  // the first Item 7 batch. Saturates at 1 after `frustrationSteps`
+  // attempts.
+  const scopePrefix = dialogOpen ? "d|" : "p|";
   let totalNoEffect = 0;
-  for (const n of noEffectCounts.values()) totalNoEffect += n;
+  for (const [k, n] of noEffectCounts) if (k.startsWith(scopePrefix)) totalNoEffect += n;
   const frustration = Math.min(1, totalNoEffect / pol.frustrationSteps);
 
   // Goal transition, evaluated before any utility is computed — priority
@@ -196,7 +206,6 @@ export function decide(ctx: DecisionContext): DecisionResult {
   // this step is fully active this step — it never rolls for survival on
   // its own creation step. A `dialog` goal whose dialog has closed ends
   // before any of this.
-  const dialogOpen = candidates.some((c) => c.inDialog);
   let goal: GoalState = ctx.goal ?? null;
   // A dialog goal is over the moment its dialog is gone (submitted or
   // closed) — evaluated first so that a screen reached by that submit
