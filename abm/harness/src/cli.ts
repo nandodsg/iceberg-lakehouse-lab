@@ -63,12 +63,19 @@ async function main() {
       // time, not results. Watch the target's latency: an overloaded dev
       // server inflates action timeouts and elapsed_time per step.
       concurrency: { type: "string", default: "1" },
+      // Minimum seconds between two agent starts (default 0 = all workers
+      // start at once). Concurrency alone makes every worker open a fresh
+      // session at the same instant, and a sign-in burst is what a small
+      // target stalls on first — well before the steady-state load of the
+      // same agents acting one step at a time. The delay is applied before
+      // the agent's own clock starts, so it never eats into its time window.
+      stagger: { type: "string", default: "0" },
     },
   });
 
   if (!values.config || !values.experiment || !values.condition || !values.accounts) {
     console.error(
-      "Usage: cli --config <path> --experiment <id> --condition <guided|unguided> --accounts <path> [--count N] [--run-id id] [--baseline] [--record video|trace|both] [--population-seed <run-id>] [--concurrency N]"
+      "Usage: cli --config <path> --experiment <id> --condition <guided|unguided> --accounts <path> [--count N] [--run-id id] [--baseline] [--record video|trace|both] [--population-seed <run-id>] [--concurrency N] [--stagger seconds]"
     );
     process.exit(1);
   }
@@ -156,10 +163,21 @@ async function main() {
     };
 
     // Worker pool: `concurrency` workers pull the next index until none left.
+    // With --stagger, starts are spaced by at least that many seconds — a
+    // single shared schedule, so a worker that frees up early still waits
+    // for the next slot instead of joining whoever is starting right now.
+    const staggerMs = Math.max(0, parseFloat(values.stagger!) || 0) * 1000;
+    let nextStartAt = 0;
     let next = 0;
     const workers = Array.from({ length: Math.min(concurrency, population.length) }, async () => {
       while (next < population.length) {
         const i = next++;
+        if (staggerMs > 0) {
+          const now = Date.now();
+          const startAt = Math.max(now, nextStartAt);
+          nextStartAt = startAt + staggerMs;
+          if (startAt > now) await new Promise((r) => setTimeout(r, startAt - now));
+        }
         await runOne(i);
       }
     });
