@@ -124,8 +124,15 @@ for this experiment; the general model stays generic there.
 
 | Kind | Trigger | Scope (which candidates count as "coherent" with it) |
 |---|---|---|
-| `dialog` | a modal/dialog becomes the focus of perception | every candidate perceived inside that dialog |
+| `dialog` | a modal/dialog becomes the focus of perception | candidates inside that dialog that carry a progress signal (an empty required field, or the submit control once the visible required fields are filled) — the same rule as `area`, applied to the dialog instead of the screen |
 | `area` | the agent arrives at a screen it has not visited yet this run | candidates on the current screen that already carry a progress signal (primary-styled, or an empty required field) |
+
+A link whose target is the screen the agent is already on never carries a
+progress signal, whatever it looks like — a highlighted "you are here"
+navigation item is a common UI convention, and following it changes
+nothing. This is a rule about URLs, not about any specific application; it
+matters because such an item is often the only filled/primary-styled
+control on an otherwise empty screen.
 
 `dialog` outranks `area`: if a dialog opens while an `area` goal is
 active, the `area` goal ends immediately (superseded, not resumed later
@@ -135,16 +142,20 @@ no further priority rule is needed.
 
 **Lifecycle**, evaluated once per step, in this order:
 
-1. If no goal is active, check the triggers above (in priority order) and
+1. If a `dialog` goal is active and no dialog is open any more (it was
+   submitted, or closed by any other means), the goal ends now — before
+   anything else is evaluated this step, so a screen reached by that
+   submit can start an `area` goal in the same step.
+2. If no goal is active, check the triggers above (in priority order) and
    start one if either fires. A goal that starts this step is fully
    active this step (`goal_age = 0`) — it does not wait a step to take
    effect.
-2. If a goal is active, first roll its survival for this step: it ends
+3. If a goal is active, first roll its survival for this step: it ends
    ("dropped") with probability `GOAL_DROP_BASE × (1 − commitment)` —
    this is the "probability of abandoning the goal per step" that
    `commitment` governs. A dropped goal produces no pull this step; the
    agent decides exactly as it would with no goal at all.
-3. A goal that survives step 2 pulls the softmax toward its coherent
+4. A goal that survives step 3 pulls the softmax toward its coherent
    candidates and resists incoherent ones (see "Utility mechanics"
    below), then:
    - ends as **satisfied** if the step's chosen action produces progress
@@ -192,6 +203,20 @@ them, not a replacement.
 | `goal` | code for the currently active goal kind: `0` = none, `1` = `dialog`, `2` = `area` |
 | `goal_age` | steps the current goal has persisted; `0` on the step it started, or on a step where it was dropped or never active |
 | `goal_pull` | the actual pull value added to the chosen option's utility this step by the mechanism above; `0` when no goal is active, the chosen option wasn't in its scope, or the goal was dropped this step |
+
+**Revision (2026-09-15)**: the first two replicated runs of this
+mechanism were measured while the perception layer's primary-styled
+detection was silently returning false for every element on the target (a
+CSS color-space serialization issue, fixed in the harness) — so the `area`
+scope above had nothing to pull toward and the mechanism degenerated into
+a blanket discount on navigation. The three refinements above
+(progress-bearing scope for `dialog`, `dialog` ending when its dialog
+closes, self-links carrying no progress) come from reading those runs'
+traces: the goal was pulling toward close/cancel controls and
+already-filled fields, lingering after its dialog had closed and thereby
+blocking the next `area` goal, and — once detection works — the current
+screen's own navigation item would have been the only "progress" on an
+empty screen.
 
 ## Population size
 

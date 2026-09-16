@@ -149,9 +149,14 @@ export function decide(ctx: DecisionContext): DecisionResult {
   // an unseen screen can start an `area` goal, otherwise a carried-over
   // goal is subject to its per-step survival roll. A goal that starts
   // this step is fully active this step — it never rolls for survival on
-  // its own creation step.
+  // its own creation step. A `dialog` goal whose dialog has closed ends
+  // before any of this.
   const dialogOpen = candidates.some((c) => c.inDialog);
   let goal: GoalState = ctx.goal ?? null;
+  // A dialog goal is over the moment its dialog is gone (submitted or
+  // closed) — evaluated first so that a screen reached by that submit
+  // can start an `area` goal on this same step.
+  if (goal?.kind === "dialog" && !dialogOpen) goal = null;
   if (dialogOpen && goal?.kind !== "dialog") {
     goal = { kind: "dialog", age: 0 };
   } else if (!goal && !dialogOpen && ctx.screenChanged && screenVisits === 0) {
@@ -182,6 +187,9 @@ export function decide(ctx: DecisionContext): DecisionResult {
     if (el.isSubmit && requiredEmpty > 0) progressSignal = 0;
     // Re-filling an already filled field is not progress.
     if (el.isFormField && el.filled) progressSignal = 0;
+    // A link to the screen already shown is not progress, however it is
+    // styled (see the experiment definition, "Goal state").
+    if (el.selfLink) progressSignal = 0;
 
     // Generic hesitation/commitment priors (see constants above).
     let caution = 1;
@@ -192,10 +200,13 @@ export function decide(ctx: DecisionContext): DecisionResult {
     if (el.visited && !el.isFormField) caution *= pol.revisitDirectFactor;
 
     // Coherence with the active goal, if any — see GoalState/definition.md
-    // "Goal state". `dialog`: anything perceived inside that dialog.
-    // `area`: anything that already carries a progress signal (reuses the
-    // same test as goal_seeking's pull above, not a new concept).
-    const coherent = goalActive && (goal!.kind === "dialog" ? el.inDialog : progressSignal > 0);
+    // "Goal state": a candidate that already carries a progress signal
+    // (the same test goal_seeking's pull uses above, not a new concept)
+    // inside the goal's container — the open dialog for `dialog`, the
+    // screen for `area`. Anything else in a dialog (close/cancel, an
+    // already-filled field, auxiliary buttons) is NOT coherent: the first
+    // replicated runs showed the goal pulling toward exactly those.
+    const coherent = goalActive && progressSignal > 0 && (goal!.kind === "dialog" ? el.inDialog : true);
     const goalPull = coherent ? commitment * pol.goalPullWeight : 0;
 
     // goal_seeking-directed pull toward this element, now plus the active

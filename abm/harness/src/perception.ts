@@ -104,6 +104,19 @@ export async function perceive(
     const isFormField = tag === "input" || tag === "select" || tag === "textarea";
     const role = (await locator.getAttribute("role").catch(() => null)) || inferImplicitRole(tag);
     const href = tag === "a" ? await locator.getAttribute("href").catch(() => null) : null;
+
+    // A link back to the current screen (typically the highlighted "you
+    // are here" item of a navigation bar). Compared by pathname only —
+    // query/hash differences don't make it a different screen for the
+    // purposes of this model.
+    let selfLink = false;
+    if (tag === "a" && href) {
+      try {
+        selfLink = new URL(href, page.url()).pathname === new URL(page.url()).pathname;
+      } catch {
+        selfLink = false;
+      }
+    }
     const isPrimaryStyled = await looksLikePrimaryAction(locator);
 
     // ref: a valid Playwright locator string that re-finds this element in
@@ -125,6 +138,7 @@ export async function perceive(
       filled,
       isSubmit,
       inDialog,
+      selfLink,
     });
   }
 

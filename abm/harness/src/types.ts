@@ -65,6 +65,8 @@ export interface PerceivedElement {
   isSubmit: boolean;
   /** Perceived inside an open modal dialog (perception scopes to the topmost one). */
   inDialog: boolean;
+  /** `a[href]` whose target resolves to the screen currently shown — following it changes nothing. */
+  selfLink: boolean;
 }
 
 /**
