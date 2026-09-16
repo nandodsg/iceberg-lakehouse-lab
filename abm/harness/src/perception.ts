@@ -18,6 +18,13 @@ const INTERACTIVE_SELECTOR =
 // HTML/ARIA convention, not app knowledge.
 const DIALOG_SELECTOR = 'dialog[open], [role="dialog"], [role="alertdialog"]';
 
+// Minimum relative-luminance gap between a control's own solid background
+// and the surface it sits on for it to read as "primary/filled" (see
+// looksLikePrimaryAction). On a 0..1 scale: a near-black or saturated
+// button on a light panel (or a light button on a dark one) clears it
+// easily; a subtle hover/active tint does not.
+const PRIMARY_CONTRAST_MIN = 0.35;
+
 export interface PerceptionOptions {
   /** refs already interacted with this run, so novelty can be computed. */
   visitedRefs: Set<string>;
@@ -134,24 +141,62 @@ function inferImplicitRole(tag: string): string {
 
 /**
  * Generic "does this look like the primary/solid action button" visual
- * heuristic — solid/filled background distinct from the page background,
- * as opposed to an outline/ghost/text-only control. This is a prior about
- * common UI design conventions, not knowledge of which specific element
- * is correct on any specific application.
+ * heuristic — a solid background that contrasts with the surface it sits
+ * on, as opposed to an outline/ghost/text-only control. This is a prior
+ * about common UI design conventions, not knowledge of which specific
+ * element is correct on any specific application.
+ *
+ * Two lessons from the first six calibration rounds (2026-09-15), during
+ * which this returned false for EVERY element on the target application:
+ * - Chromium serializes computed colors declared in modern CSS color
+ *   spaces (`oklch()`, `lab()`, `color()` — what Tailwind v4 emits for its
+ *   whole palette) in that syntax, not as `rgb()`. Matching `rgba?(` was
+ *   therefore never true. The color is now resolved by painting it onto a
+ *   1×1 canvas and reading the pixel back — sRGB bytes whatever the input
+ *   syntax.
+ * - "Solid and not white-ish" assumed a light theme. Agents routinely
+ *   toggle the application's theme mid-run, after which the primary
+ *   control is light on dark. Contrast against the nearest opaque
+ *   ancestor's background is theme-independent.
  */
 async function looksLikePrimaryAction(locator: Locator): Promise<boolean> {
   return locator
-    .evaluate((el) => {
-      const style = window.getComputedStyle(el as Element);
-      const bg = style.backgroundColor;
-      // Treat "has a non-transparent, non-white-ish solid background" as
-      // the generic signal of a filled/primary-styled control.
-      const m = bg.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
-      if (!m) return false;
-      const [, r, g, b, a] = m.map(Number);
-      const alpha = Number.isNaN(a) ? 1 : a;
-      const isWhitish = r > 240 && g > 240 && b > 240;
-      return alpha > 0.5 && !isWhitish;
-    })
+    .evaluate((el, minContrast) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return false;
+      const SENTINEL = "#010203";
+      // Any CSS color syntax → [r, g, b, alpha 0..1], or null if unparseable.
+      const toRgba = (css: string): [number, number, number, number] | null => {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = SENTINEL;
+        ctx.fillStyle = css;
+        if (ctx.fillStyle === SENTINEL) return null;
+        ctx.fillRect(0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0], d[1], d[2], d[3] / 255];
+      };
+      // WCAG relative luminance, 0 (black) .. 1 (white).
+      const luminance = ([r, g, b]: [number, number, number, number]): number => {
+        const lin = (c: number) => {
+          c /= 255;
+          return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      };
+      const own = toRgba(getComputedStyle(el as Element).backgroundColor);
+      if (!own || own[3] <= 0.5) return false;
+      // The surface the control sits on: nearest ancestor with an opaque
+      // enough background (a dialog panel, a card, the page), else the
+      // browser's default white canvas.
+      let backdrop: [number, number, number, number] | null = null;
+      for (let p = (el as Element).parentElement; p && !backdrop; p = p.parentElement) {
+        const c = toRgba(getComputedStyle(p).backgroundColor);
+        if (c && c[3] > 0.5) backdrop = c;
+      }
+      if (!backdrop) backdrop = [255, 255, 255, 1];
+      return Math.abs(luminance(own) - luminance(backdrop)) >= minContrast;
+    }, PRIMARY_CONTRAST_MIN)
     .catch(() => false);
 }
