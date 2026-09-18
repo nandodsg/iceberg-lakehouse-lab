@@ -8,8 +8,8 @@ This document is what that contract's free-form fields
 (`agent_parameters`, `condition`, `journey_stage`, `decision_signals`)
 resolve against for this experiment specifically.
 
-Status: **mechanism validated under `guided` (replicated pilot runs);
-the H1 comparison itself has not been run yet.** Research question and
+Status: **H1 comparison run (2026-09-16) — H1 supported; see "Result"
+at the end of this document.** Research question and
 hypothesis (H1) are defined in
 [`abm_data_generator.md`](../../abm_data_generator.md) §3-4 — not
 repeated here, this document only adds the concrete configuration needed
@@ -386,7 +386,10 @@ changes every run and isn't an experiment-design decision.
 - Is `Uniform(0,1)` actually the right sampling shape, or should v2 use
   something else once pilot data exists to look at?
 - Should parameters covary (e.g. is a highly exploratory agent also
-  plausibly slower / higher time_cost). v1 assumes independence.
+  plausibly slower / higher time_cost). v1 assumes independence — and
+  the v1 data shows why that matters; see "Result", covariance. A v2
+  should either sample with covariance or define the "capable" class
+  on more than one parameter.
 - **Future experiment, not this one**: does a naive agent starting from
   the application's general hub (rather than dropped directly into
   Gestão de Entidades) discover the right product area at all? A
@@ -400,3 +403,75 @@ changes every run and isn't an experiment-design decision.
 - **v2 goal mechanism**: should an `area` goal resume if a superseding
   `dialog` goal closes before expiring, instead of ending permanently?
   Deferred for the same reason.
+
+## Result (v1, run 2026-09-16)
+
+**H1 supported.** Two phases, same day, same target build for every
+batch, same population under both conditions within a phase (the
+population seed re-derives the same agents; `condition` only changes
+which flow the target serves):
+
+- **Phase A** — the small replicated population from the pilots (6
+  agents including the baseline), 3 replicates per condition, batches
+  alternated `guided`/`unguided`. Primary metric, as pre-registered:
+  completion (Company → Team → Member) among agents with high
+  `goal_seeking` (≥ 0.65), averaged over replicates. `guided` 5 of 9
+  such agent-runs completed; `unguided` 0 of 9. Direction the same in
+  all three paired replicates (+67, +67, +33 percentage points);
+  difference between conditions larger than the spread between
+  replicates of the same condition.
+- **Phase B** — the scale this document asks for: 30 agents + baseline
+  per condition, sampled independently per parameter (`Uniform(0, 1)`),
+  one batch per condition. `guided` 2 of 8 capable agents completed;
+  `unguided` 0 of 8. Same direction as Phase A, so no second replicate
+  at scale was run.
+
+Across both phases, **no agent under `unguided` reached Member** (0 of
+49; 0 of 17 in the capable class); under `guided`, 16 of 49 (7 of 17).
+The strict rule above (never left the product area) and the observed
+completion coincide: every completing agent stayed in scope.
+
+**What the traces say the mechanism is** — this is the effect of the
+independent variable on this decision model, not a harness defect:
+after creating a company, the unguided agent lands back on the listing
+it came from. The listing's primary control is still "create", the
+`area` goal does not fire (the screen has already been visited this
+run), and salience wins: the agent creates another company. At scale,
+unguided agents created about 5 companies each versus fewer than 2
+under `guided`; the single most-repeated action in the whole experiment
+was that create control under `unguided`. The guided redirect is
+precisely what hands the agent a *new* screen at every step — the one
+thing this model's goal mechanism reacts to. Whether a human reads the
+listing the same way is a question for human data, not for this model.
+
+**Secondary hypothesis (leaving scope)**: in the predicted direction —
+more unguided agents left the product area at least once (56% vs 44%
+in Phase A, 74% vs 52% in Phase B) and more of them ended by going
+idle. But the loop diagnostics tell a more specific story: the
+unguided agent does not wander (fewer A→B→A oscillations than guided);
+it repeats.
+
+**Covariance** (answering the open question above): under `Uniform(0,
+1)` with independent parameters, high `goal_seeking` does not imply
+persistence. In Phase B, 5 of the 6 capable agents that did *not*
+complete under `guided` had high `abandonment_propensity` and left
+early; among capable agents with low abandonment, most completed. The
+primary metric stays as pre-registered; the sampling shape, or a
+"capable" class defined on two parameters, is a v2 design decision.
+
+**Method caveats**: no statistical test, by design (§4 of the ABM
+document) — three paired replicates of a small population plus one
+batch per condition at scale; "supported" is the pre-registered
+mechanical reading, not a causal claim. The completion window was 5
+minutes (see "Execution configuration"). Under both conditions the
+target application received the runs with the correct condition label
+on every agent, recorded experiment exposure for every agent that
+created a company, and its processed analytics reports and warehouse
+export agree with the harness's own event stream (up to a known
+client-side loss on some of the target's conversion events, equal in
+both conditions) — so the data of this experiment exists on the
+analytics side, ready for the ingestion pipeline (`foundation/`). A
+known accessibility gap in the target's global forms — which the
+unguided path depends on more — was not fixed before this run; both
+conditions measured the same application, but it is a reason to expect
+`unguided` to improve in a v2 on a corrected target.
