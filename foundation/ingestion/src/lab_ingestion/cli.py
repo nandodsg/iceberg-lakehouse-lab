@@ -31,9 +31,29 @@ def _source(cfg: Config, name: str, kind: type):
     return src
 
 
+def _expand(paths: list[str]) -> list[Path]:
+    """Files, directories (all *.jsonl inside, non-recursive) or glob
+    patterns — expanded here so the command behaves the same from a
+    shell that expands globs (bash) and one that does not (PowerShell)."""
+    import glob
+
+    out: list[Path] = []
+    for p in paths:
+        if any(ch in p for ch in "*?["):
+            out.extend(Path(m) for m in sorted(glob.glob(p)))
+        elif Path(p).is_dir():
+            out.extend(sorted(Path(p).glob("*.jsonl")))
+        else:
+            out.append(Path(p))
+    missing = [str(p) for p in out if not p.is_file()]
+    if missing or not out:
+        raise typer.BadParameter(f"no such file(s): {missing or paths}")
+    return out
+
+
 @app.command("abm-jsonl")
 def abm_jsonl(
-    paths: list[Path] = typer.Argument(..., help="JSONL batch files (one file = one load partition)"),
+    paths: list[str] = typer.Argument(..., help="JSONL batch files, directories or glob patterns (one file = one load partition)"),
     config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),
     source: str = typer.Option("abm", "--source", "-s", help="source name in the config"),
 ):
@@ -46,7 +66,7 @@ def abm_jsonl(
     catalog = open_catalog(cfg.catalog)
     run_id = new_run_id()
     records = []
-    for p in paths:
+    for p in _expand(paths):
         rec = load_file(catalog, cfg.catalog.namespace, src, p, run_id)
         records.append(rec)
         checks = [c for c in rec.contract_checks if c["executed"]]
@@ -66,6 +86,7 @@ def runs(
     limit: int = typer.Option(20, "--limit", "-n"),
     run_id: str | None = typer.Option(None, "--run", help="only this ingestion run id"),
     as_json: bool = typer.Option(False, "--json", help="full manifest rows (incl. contract checks) as JSON lines"),
+    out: Path | None = typer.Option(None, "--out", "-o", help="with --json: write to this file (UTF-8) instead of stdout"),
 ):
     """Show the most recent manifest rows."""
     import json
@@ -78,10 +99,17 @@ def runs(
         df = [r for r in df if r["run_id"] == run_id]
     df.sort(key=lambda r: (r["load_ts"], r["partition"]), reverse=True)
     if as_json:
+        lines = []
         for r in df[:limit]:
             r["load_ts"] = r["load_ts"].isoformat()
             r["contract_checks"] = json.loads(r["contract_checks"] or "[]")
-            typer.echo(json.dumps(r, ensure_ascii=False))
+            lines.append(json.dumps(r, ensure_ascii=False))
+        if out:
+            out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            typer.echo(f"{len(lines)} manifest row(s) -> {out}")
+        else:
+            for line in lines:
+                typer.echo(line)
         return
     for r in df[:limit]:
         typer.echo(
