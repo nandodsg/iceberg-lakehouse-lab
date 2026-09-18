@@ -8,8 +8,9 @@ This document is what that contract's free-form fields
 (`agent_parameters`, `condition`, `journey_stage`, `decision_signals`)
 resolve against for this experiment specifically.
 
-Status: **H1 comparison run (2026-09-16) — H1 supported; see "Result"
-at the end of this document.** Research question and
+Status: **H1 comparison run (2026-09-16) and independently replicated
+at larger scale (2026-09-18) — H1 supported; see "Result" at the end of
+this document.** Research question and
 hypothesis (H1) are defined in
 [`abm_data_generator.md`](../../abm_data_generator.md) §3-4 — not
 repeated here, this document only adds the concrete configuration needed
@@ -404,12 +405,13 @@ changes every run and isn't an experiment-design decision.
   `dialog` goal closes before expiring, instead of ending permanently?
   Deferred for the same reason.
 
-## Result (v1, run 2026-09-16)
+## Result (v1, run 2026-09-16; replicated 2026-09-18)
 
-**H1 supported.** Two phases, same day, same target build for every
-batch, same population under both conditions within a phase (the
+**H1 supported.** Three phases. Within each phase, the same target build
+for every batch and the same population under both conditions (the
 population seed re-derives the same agents; `condition` only changes
-which flow the target serves):
+which flow the target serves). The first two phases ran on one day; the
+third, a pre-registered confirmatory replication, two days later:
 
 - **Phase A** — the small replicated population from the pilots (6
   agents including the baseline), 3 replicates per condition, batches
@@ -426,10 +428,29 @@ which flow the target serves):
   `unguided` 0 of 8. Same direction as Phase A, so no second replicate
   at scale was run.
 
-Across both phases, **no agent under `unguided` reached Member** (0 of
-49; 0 of 17 in the capable class); under `guided`, 16 of 49 (7 of 17).
-The strict rule above (never left the product area) and the observed
-completion coincide: every completing agent stayed in scope.
+- **Phase C — confirmatory replication, one design, larger N.** Written
+  up and pre-registered before any account was created, after reading
+  the results above (so that the reader can weigh it accordingly): two
+  new populations of 50 (49 sampled + baseline), each run under both
+  conditions, batches alternated — **100 agents per condition**, paired
+  by population; one valid run per batch, no reruns on the basis of
+  results (one batch was restarted for an infrastructure reason before
+  producing data; two agents out of 200 were lost to isolated
+  infrastructure timeouts before their first action). Same primary
+  metric. `guided` 16 of 29 capable agents completed; `unguided` 3 of
+  30. Per paired population: +46 and +45 percentage points — the two
+  replicates agree to within one point. Overall, 33 of 98 under `guided`
+  versus 3 of 100 under `unguided`. A pre-declared Fisher exact test
+  gives p ≈ 2×10⁻⁴ for the capable class and p ≈ 6×10⁻⁹ overall; see
+  the caveat below on what such a p-value means for a simulation.
+
+Across the first two phases no agent under `unguided` reached Member
+(0 of 49); the replication shows the path is not impossible, only rare:
+the three unguided agents that completed all had high `goal_seeking`
+**and** high `commitment` — the agents that persist with a goal find the
+global forms. The strict rule above (never left the product area) and
+the observed completion coincide almost exactly: completing agents stay
+in scope.
 
 **What the traces say the mechanism is** — this is the effect of the
 independent variable on this decision model, not a harness defect:
@@ -437,19 +458,27 @@ after creating a company, the unguided agent lands back on the listing
 it came from. The listing's primary control is still "create", the
 `area` goal does not fire (the screen has already been visited this
 run), and salience wins: the agent creates another company. At scale,
-unguided agents created about 5 companies each versus fewer than 2
+unguided agents created about 4-5 companies each versus fewer than 2
 under `guided`; the single most-repeated action in the whole experiment
-was that create control under `unguided`. The guided redirect is
+was that create control under `unguided`. The gap opens at the second
+step: in the replication, half of the guided agents reached Team and a
+fifth of the unguided ones did — completion follows from there. The
+redirect also lifts agents that are not actively goal-seeking (the
+middle of the `goal_seeking` range): 15 of 49 completed under `guided`,
+0 of 50 under `unguided`. The guided redirect is
 precisely what hands the agent a *new* screen at every step — the one
 thing this model's goal mechanism reacts to. Whether a human reads the
 listing the same way is a question for human data, not for this model.
 
-**Secondary hypothesis (leaving scope)**: in the predicted direction —
-more unguided agents left the product area at least once (56% vs 44%
-in Phase A, 74% vs 52% in Phase B) and more of them ended by going
-idle. But the loop diagnostics tell a more specific story: the
-unguided agent does not wander (fewer A→B→A oscillations than guided);
-it repeats.
+**Secondary hypothesis (leaving scope)**: in the predicted direction in
+all three phases — more unguided agents left the product area at least
+once (56% vs 44%, 74% vs 52%, 66% vs 57%) and more of them ended by
+going idle. But the loop diagnostics tell a more specific story: the
+unguided agent does not wander (no more A→B→A oscillations than
+guided); it repeats — the worst run of consecutive clicks on one
+control is two to three times longer under `unguided`. Those who do
+complete under `unguided` take longer (about 110 s versus 75 s to
+Member in the replication).
 
 **Covariance** (answering the open question above): under `Uniform(0,
 1)` with independent parameters, high `goal_seeking` does not imply
@@ -459,11 +488,21 @@ early; among capable agents with low abandonment, most completed. The
 primary metric stays as pre-registered; the sampling shape, or a
 "capable" class defined on two parameters, is a v2 design decision.
 
-**Method caveats**: no statistical test, by design (§4 of the ABM
-document) — three paired replicates of a small population plus one
-batch per condition at scale; "supported" is the pre-registered
-mechanical reading, not a causal claim. The completion window was 5
-minutes (see "Execution configuration"). Under both conditions the
+**Method caveats**: the verdict is the pre-registered mechanical reading
+(direction consistent across paired replicates, difference outside the
+between-replicate spread), not a causal claim (§4 of the ABM document).
+The p-values reported for Phase C describe the *model*: the randomness
+they test against is the simulator's number generator, and agents cost
+nothing, so any difference becomes "significant" at some N. They say
+how precisely this decision model's behavior is known under the two
+flows — nothing about how closely it resembles people, which only
+calibration against human data can say. The first phase's three
+replicates re-used the same six agents (paired, not independent); only
+Phases B and C sample agents independently. The completion window was 5
+minutes (see "Execution configuration"). Phase C ran on a later build
+of the target than Phases A and B; the changes between them did not
+touch the flow under study (public pages and analytics initialization
+only), and both conditions of every phase ran on the same build. Under both conditions the
 target application received the runs with the correct condition label
 on every agent, recorded experiment exposure for every agent that
 created a company, and its processed analytics reports and warehouse
