@@ -1,0 +1,35 @@
+# lab-ingest configuration — SHAPE ONLY. The real file for a deployment
+# (identifiers, dataset names, which user properties to promote, DSN
+# environment variable) is kept outside this repository, and is passed
+# with `--config`. Relative paths resolve against this file's directory.
+
+catalog:
+  type: sql                      # sql (local, dev/acceptance) | glue (AWS foundation)
+  name: lab
+  warehouse: ./warehouse         # sql: local directory; glue: s3://bucket/prefix
+  namespace: bronze
+
+sources:
+  abm:
+    kind: abm_jsonl
+    table: abm_decision_steps
+    contract: ../../contracts/abm-behavioral-events.contract.yaml
+
+  events:
+    kind: ga4_bigquery
+    table: app_events
+    project: your-gcp-project
+    dataset: analytics_000000000
+    location: your-region
+    population_property: population
+    population_allow: [abm, synthetic]
+    promoted_user_properties: [population, exp_example_experiment]
+    # contract: path to the source application's GA4 events export contract, when it exists
+
+  entities:
+    kind: postgres_export
+    dsn_env: LAB_PG_DSN          # the DSN itself is never in a file
+    schema_name: export
+    contract: path/to/entities-export.contract.yaml
+    tables:                      # export view -> bronze table (Lab-chosen public names)
+      companies: app_entities_companies

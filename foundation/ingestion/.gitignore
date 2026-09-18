@@ -1,0 +1,4 @@
+.venv/
+warehouse/
+*.local.yaml
+config.yaml

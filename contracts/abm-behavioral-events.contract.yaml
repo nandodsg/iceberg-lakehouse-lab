@@ -9,10 +9,17 @@
 # A completed agent run therefore emits many rows, the last one carrying
 # journey_completed = true (success) or the terminal abandon/timeout action.
 #
-# Status: DRAFT v0.5 (2026-09-11) — drawn from the conceptual field list in
-# abm/abm_data_generator.md §11. Not yet validated against an actual
-# harness implementation; expect revisions once a real pilot run produces
-# actual events to check this against.
+# Status: v1.0.0 ACTIVE (2026-09-18). v0.5 (2026-09-11) was drawn from the
+# conceptual field list in abm/abm_data_generator.md §11 before any harness
+# existed; v1.0 is the same envelope validated against the real harness
+# output of the first experiment (guided-vs-unguided-v1: 16 batch files,
+# 23,847 decision-steps, 328 agents, three phases) by foundation/ingestion/.
+# What changed from v0.5 — all corrections of physical detail, no field
+# added or removed: run_id/agent_id are labels, not uuids; elapsed_time is
+# an integer number of seconds; timestamp is ISO 8601 with millisecond
+# precision; the physical representation of the open-structure fields at
+# ingestion is fixed (JSON text); the terminal-row quality rule names the
+# two real abandon actions and is now executed by the ingestion layer.
 #
 # Design choice (v0.2, extended v0.3-v0.4): this contract fixes the stable
 # ENVELOPE only. Anything whose shape/presence is expected to vary across
@@ -33,8 +40,8 @@ apiVersion: v3.0.0
 kind: DataContract
 id: abm-behavioral-events
 name: ABM Behavioral Events
-version: 0.5.0
-status: draft
+version: 1.0.0
+status: active
 domain: iceberg-lakehouse-lab
 description:
   purpose: >
@@ -52,12 +59,14 @@ description:
     metrics (time to completion, abandonment rate, action count, deviation
     from expected path) defined in abm/abm_data_generator.md §14.
   limitations: >
-    Draft schema — field set matches the conceptual list in
-    abm/abm_data_generator.md §11 but types/nullability have not yet been
-    exercised against a real harness run. agent_parameters/condition/
-    journey_stage are intentionally open-ended (see design choice above);
-    no experiment definition exists yet to validate their actual content
-    against.
+    agent_parameters/decision_signals/condition/journey_stage are
+    intentionally open-ended (see design choice above): their content is
+    validated against the experiment definition named in experiment_id
+    (abm/experiments/<experiment>/definition.md), not by this contract.
+    One JSONL file is one harness batch and is the unit of (re)load at
+    ingestion; run_id inside the rows identifies the batch logically but a
+    batch that was aborted and re-run produces two files with the same
+    run_id — the file, not run_id, tells them apart.
 
 schema:
   - name: abm_event
@@ -76,19 +85,23 @@ schema:
 
       - name: run_id
         logicalType: string
-        physicalType: uuid
+        physicalType: varchar
         required: true
         description: >
           Identifies one execution batch of the harness (see
           abm/abm_data_generator.md §15 — "every run should be
           identifiable and reproducible"). Every agent in the same batch
-          shares a run_id.
+          shares a run_id. A human-chosen label (the batch name), not a
+          generated uuid — v0.5 said uuid; the harness never did that.
 
       - name: agent_id
         logicalType: string
-        physicalType: uuid
+        physicalType: varchar
         required: true
-        description: Identifies one simulated agent within a run.
+        description: >
+          Identifies one simulated agent within a run — a label derived
+          from run_id (e.g. "<run_id>-agent-<n>"; the baseline agent
+          carries "-baseline"), unique within the run, not a uuid.
 
       - name: agent_parameters
         logicalType: object
@@ -109,9 +122,10 @@ schema:
           experimentation"; §18 anticipates richer distributions and
           adaptive agents). Consumers resolve specific keys against the
           experiment named in `experiment_id`, not against this contract.
-          Physical representation at ingestion time (JSON string, MAP,
-          engine-native VARIANT/STRUCT) is an open decision for
-          foundation/ingestion/, not fixed here.
+          Physical representation at ingestion time (decided v1.0): the
+          object is stored in bronze as JSON text, verbatim, so that any
+          engine can parse it (json_extract / from_json / VARIANT) and no
+          key set is baked into the bronze schema.
           `required: false` at the contract level — not because it's
           unimportant (it's essential to this experiment's own analysis,
           §16's parameter-variation checks) but because a future
@@ -139,16 +153,22 @@ schema:
         physicalType: varchar
         required: true
         description: >
-          The target application's own session/user identifier for this
-          agent's run — the join key back to its native GA4 events and
-          entity-table rows. Exact source is an integration detail outside
-          this contract's scope.
+          The target application's own stable user identifier for the
+          synthetic account this agent ran as — the join key back to its
+          native analytics events and entity-table rows (the application's
+          own export contract guarantees the same identifier on both). A
+          uuid in practice; which application field supplies it is an
+          integration-module detail outside this contract's scope. One
+          value per (run_id, agent_id); never reused across runs (one
+          synthetic account per agent per run).
 
       - name: timestamp
         logicalType: date
         physicalType: timestamp
         required: true
-        description: When this event was recorded, UTC, ISO 8601.
+        description: >
+          When this event was recorded, UTC, ISO 8601 with millisecond
+          precision and a trailing Z (e.g. 2026-09-16T19:25:08.812Z).
 
       - name: screen
         logicalType: string
@@ -206,13 +226,18 @@ schema:
           guarantee, not one this contract can make for every experiment
           that will ever use it. Shape owned by the experiment/decision-model
           version named in experiment_id, same treatment as
-          agent_parameters.
+          agent_parameters — including the physical representation in
+          bronze (JSON text). Observed in v1: the key set varies row to
+          row within one experiment (signals present only on some
+          steps), which is exactly why it is not fixed here.
 
       - name: elapsed_time
-        logicalType: number
-        physicalType: float
+        logicalType: integer
+        physicalType: integer
         required: true
-        description: Seconds elapsed since this agent's run started.
+        description: >
+          Whole seconds elapsed since this agent's run started (the
+          harness rounds; v0.5 said float).
 
       - name: journey_stage
         logicalType: string
@@ -236,12 +261,26 @@ schema:
 
 quality:
   - description: >
-      Every (run_id, agent_id) pair should have exactly one event with
-      action = abandon OR journey_completed = true as its last row by
-      timestamp — a run should never just trail off without a terminal
-      event.
+      Every (run_id, agent_id) pair ends — its last row by timestamp —
+      on a terminal row: journey_completed = true, or action in
+      (abandon_idle, abandon_logout). A run must never just trail off.
+      A batch that was interrupted mid-run (host went to sleep, process
+      killed) fails this check for the agents cut short: that is the
+      signal to treat the file as an aborted batch, not to fix the rows.
     dimension: completeness
-    status: not yet implemented
+    type: custom
+    engine: lab-ingestion
+    implementation: terminal_row_per_agent
+    status: implemented — executed at ingestion on every batch file; result recorded in the ingestion manifest
+  - description: >
+      Within one batch file, every (run_id, agent_id) maps to exactly one
+      session_id and every session_id to exactly one agent — the join key
+      to the target application must not be shared or switched mid-run.
+    dimension: uniqueness
+    type: custom
+    engine: lab-ingestion
+    implementation: one_session_per_agent
+    status: implemented — executed at ingestion on every batch file
   - description: >
       Value ranges/required keys for agent_parameters (and valid values
       for condition/journey_stage) are validated against the experiment
@@ -250,4 +289,5 @@ quality:
       definition (abm/experiments/) is responsible for documenting and
       validating its own parameter ranges.
     dimension: validity
-    status: not yet implemented — no experiment definition exists yet to validate against
+    type: text
+    status: documented per experiment (abm/experiments/guided-vs-unguided/definition.md); not automated

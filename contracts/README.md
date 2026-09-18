@@ -22,5 +22,7 @@ those remain authoritative in that repository. The Lab only consumes them.
 ## Contents
 
 - [`abm-behavioral-events.contract.yaml`](abm-behavioral-events.contract.yaml)
-  — DRAFT v0.1. One row per ABM agent decision-step; see the file's own
-  header for grain, status, and open validation items.
+  — v1.0.0, active (2026-09-18). One row per ABM agent decision-step;
+  validated against the real harness output of the first experiment and
+  enforced at ingestion by `foundation/ingestion/` (its `quality:` rules
+  of type `custom` name the checks that layer executes).
