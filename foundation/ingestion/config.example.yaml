@@ -24,6 +24,9 @@ sources:
     population_property: population
     population_allow: [abm, synthetic]
     promoted_user_properties: [population, exp_example_experiment]
+    known_user_sources:          # where user ids without a population tag may still be accepted from
+      - {table: abm_decision_steps, column: session_id}
+      # - {table: app_entities_profiles, column: id, population_column: population}
     # contract: path to the source application's GA4 events export contract, when it exists
 
   entities:

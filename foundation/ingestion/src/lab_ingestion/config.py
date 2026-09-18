@@ -37,6 +37,17 @@ class AbmJsonlSource(BaseModel):
     contract: Path
 
 
+class KnownUsersRef(BaseModel):
+    """Where the GA4 source finds the user ids it may keep when an event
+    carries no population tag at all (a login fires before the tag is
+    attached): a column of another bronze table. When `population_column`
+    is set, only rows whose value is in `population_allow` contribute."""
+
+    table: str
+    column: str
+    population_column: str | None = None
+
+
 class Ga4BigQuerySource(BaseModel):
     """A GA4 property's BigQuery Export dataset (`events_YYYYMMDD` daily
     tables, optionally `events_intraday_YYYYMMDD`)."""
@@ -53,8 +64,12 @@ class Ga4BigQuerySource(BaseModel):
     population_property: str = "population"
     # Rows whose population is in this list are loaded; rows with no
     # population at all are loaded only if their user id is in the
-    # allow-list built from the other bronze sources (see the source).
+    # allow-list built from `known_user_sources`; everything else is
+    # filtered out and counted in the manifest (`rows_filtered`).
     population_allow: list[str] = Field(default_factory=lambda: ["abm", "synthetic"])
+    known_user_sources: list[KnownUsersRef] = Field(
+        default_factory=lambda: [KnownUsersRef(table="abm_decision_steps", column="session_id")]
+    )
     contract: Path | None = None
 
 

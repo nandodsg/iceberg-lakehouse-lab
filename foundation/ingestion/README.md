@@ -72,8 +72,11 @@ application's implementation is, or may be, in this tree (see
 cd foundation/ingestion
 uv venv .venv && uv pip install -e ".[dev]"        # + [bigquery] / [postgres] / [glue] as needed
 
-lab-ingest abm-jsonl -c /path/to/config.yaml runs/*.jsonl   # ABM batches -> bronze.abm_decision_steps
-lab-ingest tables    -c /path/to/config.yaml                # bronze tables and row counts
+lab-ingest abm-jsonl  -c /path/to/config.yaml runs/*.jsonl        # ABM batches -> bronze.abm_decision_steps
+lab-ingest ga4-tables -c /path/to/config.yaml                     # which export days exist (daily / intraday)
+lab-ingest ga4        -c /path/to/config.yaml 2026-01-01..2026-01-03   # export days -> bronze.app_events
+lab-ingest ga4        -c /path/to/config.yaml 2026-01-04 --intraday    # today's streaming table, replaced by the daily later
+lab-ingest tables     -c /path/to/config.yaml                     # bronze tables and row counts
 lab-ingest runs      -c /path/to/config.yaml                # the manifest, most recent first
 pytest                                                      # synthetic fixtures only
 ```
@@ -85,7 +88,19 @@ pytest                                                      # synthetic fixtures
   decision-steps, 303 agents) and loaded locally with all contract checks passing on
   every complete batch and failing — as designed — on the two aborted
   ones.
-- `app_events` (GA4 BigQuery Export): next.
+- `app_events` (GA4 BigQuery Export): implemented. One export day = one
+  partition; the daily table is the truth, the intraday (streaming)
+  table loads only under `--intraday` into the same partition, flagged,
+  and is replaced by the daily one (the reverse is refused). The export's
+  nested structure is kept as Iceberg list/struct columns; `event_ts`
+  and the configured user properties are promoted to top-level columns.
+  A population policy runs before the write and is counted in the
+  manifest: rows tagged with an allowed population are kept, untagged
+  rows only when their user id is already known from another bronze
+  source (a login fires before the tag exists), everything else is
+  filtered out. Acceptance so far: the per-batch GA4 × ABM cross-check
+  the previous experiment ran directly against BigQuery is reproduced
+  from the two local bronze tables alone, number for number.
 - `app_entities_*`: waits on the application's entities export contract
   and read-only export views.
 - Shared AWS catalog: after the local acceptance passes.
