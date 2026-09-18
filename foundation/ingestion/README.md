@@ -82,7 +82,7 @@ pytest                                                      # synthetic fixtures
 
 - `abm_decision_steps`: implemented; contract v1.0.0 validated against
   the full output of the first experiment (16 batch files, 23,847
-  decision-steps) and loaded locally with all contract checks passing on
+  decision-steps, 303 agents) and loaded locally with all contract checks passing on
   every complete batch and failing — as designed — on the two aborted
   ones.
 - `app_events` (GA4 BigQuery Export): next.

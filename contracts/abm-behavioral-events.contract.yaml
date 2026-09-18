@@ -12,8 +12,9 @@
 # Status: v1.0.0 ACTIVE (2026-09-18). v0.5 (2026-09-11) was drawn from the
 # conceptual field list in abm/abm_data_generator.md §11 before any harness
 # existed; v1.0 is the same envelope validated against the real harness
-# output of the first experiment (guided-vs-unguided-v1: 16 batch files,
-# 23,847 decision-steps, 328 agents, three phases) by foundation/ingestion/.
+# output of the first experiment (guided-vs-unguided-v1: 16 batch files
+# including two aborted attempts, 23,847 decision-steps, 303 distinct
+# agents, three phases) by foundation/ingestion/.
 # What changed from v0.5 — all corrections of physical detail, no field
 # added or removed: run_id/agent_id are labels, not uuids; elapsed_time is
 # an integer number of seconds; timestamp is ISO 8601 with millisecond

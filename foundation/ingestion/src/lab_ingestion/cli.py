@@ -64,13 +64,25 @@ def abm_jsonl(
 def runs(
     config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),
     limit: int = typer.Option(20, "--limit", "-n"),
+    run_id: str | None = typer.Option(None, "--run", help="only this ingestion run id"),
+    as_json: bool = typer.Option(False, "--json", help="full manifest rows (incl. contract checks) as JSON lines"),
 ):
     """Show the most recent manifest rows."""
+    import json
+
     cfg = _load(config)
     catalog = open_catalog(cfg.catalog)
     table = catalog.load_table((cfg.catalog.namespace, MANIFEST_TABLE))
     df = table.scan().to_arrow().to_pylist()
-    df.sort(key=lambda r: r["load_ts"], reverse=True)
+    if run_id:
+        df = [r for r in df if r["run_id"] == run_id]
+    df.sort(key=lambda r: (r["load_ts"], r["partition"]), reverse=True)
+    if as_json:
+        for r in df[:limit]:
+            r["load_ts"] = r["load_ts"].isoformat()
+            r["contract_checks"] = json.loads(r["contract_checks"] or "[]")
+            typer.echo(json.dumps(r, ensure_ascii=False))
+        return
     for r in df[:limit]:
         typer.echo(
             f"{r['load_ts']:%Y-%m-%d %H:%M:%S} {r['run_id']} {r['source']:<14} "
