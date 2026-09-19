@@ -77,9 +77,9 @@ def resolve_dsn(src: PostgresExportSource, config_dir: Path) -> str:
     v = os.environ.get(src.dsn_env)
     if v:
         return v
-    env_file = config_dir / ".env"
+    env_file = (config_dir / ".env").resolve()
     if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
+        for line in env_file.read_text(encoding="utf-8-sig").splitlines():  # -sig: tolerate a BOM
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue

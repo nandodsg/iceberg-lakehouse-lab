@@ -52,6 +52,15 @@ def _expand(paths: list[str]) -> list[Path]:
     return out
 
 
+def _dsn(src: PostgresExportSource, config: Path) -> str:
+    from .sources.postgres_export import resolve_dsn
+
+    try:
+        return resolve_dsn(src, config.parent)
+    except RuntimeError as e:
+        raise typer.BadParameter(str(e)) from None
+
+
 @app.command("abm-jsonl")
 def abm_jsonl(
     paths: list[str] = typer.Argument(..., help="JSONL batch files, directories or glob patterns (one file = one load partition)"),
@@ -177,7 +186,6 @@ def entities(
         new_snapshot_ts,
         normalize_snapshot_ts,
         open_connection,
-        resolve_dsn,
     )
 
     cfg = _load(config)
@@ -191,7 +199,7 @@ def entities(
     run_id = new_run_id()
     records = []
     rejected = 0
-    with open_connection(resolve_dsn(src, config.parent)) as conn:
+    with open_connection(_dsn(src, config)) as conn:
         fetch = lambda view, cols: fetch_view(conn, src.schema_name, view, cols)  # noqa: E731
         for view in wanted:
             try:
@@ -223,11 +231,11 @@ def pg_probe(
     """What the export role can reach: identity and settings, granted
     relations, and a real SELECT attempt on every table outside the
     export schema (all of them should be denied)."""
-    from .sources.postgres_export import open_connection, probe, resolve_dsn
+    from .sources.postgres_export import open_connection, probe
 
     cfg = _load(config)
     src = _source(cfg, source, PostgresExportSource)
-    with open_connection(resolve_dsn(src, config.parent)) as conn:
+    with open_connection(_dsn(src, config)) as conn:
         info = probe(conn, src.schema_name)
     typer.echo(f"role {info['role']}  search_path {info['search_path']}  statement_timeout {info['statement_timeout']}")
     typer.echo(f"server {info['version'].split(',')[0]}")
