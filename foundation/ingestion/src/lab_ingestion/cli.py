@@ -160,6 +160,42 @@ def ga4_tables(
         )
 
 
+@app.command("duckdb")
+def duckdb_cmd(
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),
+    out: Path | None = typer.Option(None, "--out", "-o", help="DuckDB database to (re)write [default: <warehouse>/lab.duckdb]"),
+    ui: bool = typer.Option(False, "--ui", help="after writing the views, start the DuckDB UI on it and keep it running"),
+):
+    """Write a DuckDB database with one view per bronze table (pointing at
+    each table's current Iceberg metadata) — plain SQL over the bronze."""
+    from .explore import duckdb_views, start_ui
+
+    cfg = _load(config)
+    catalog = open_catalog(cfg.catalog)
+    db = out or Path(cfg.catalog.warehouse) / "lab.duckdb"
+    for name, meta in duckdb_views(catalog, cfg.catalog.namespace, db):
+        typer.echo(f"view {name:<24} -> {meta}")
+    typer.echo(f"{db}  (re-run after every load: the views point at a fixed metadata file)")
+    if ui:
+        start_ui(db, announce=typer.echo)
+
+
+@app.command("anatomy")
+def anatomy_cmd(
+    table: str = typer.Argument(..., help="bronze table name"),
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),
+    max_files: int = typer.Option(40, "--max-files", help="data files to list before summarizing"),
+):
+    """Show the chain of files behind one Iceberg table: catalog row ->
+    metadata -> snapshot -> manifest list -> manifests -> data files."""
+    from .explore import anatomy
+
+    cfg = _load(config)
+    catalog = open_catalog(cfg.catalog)
+    for line in anatomy(catalog, cfg.catalog.namespace, table, max_files=max_files):
+        typer.echo(line)
+
+
 @app.command("runs")
 def runs(
     config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),

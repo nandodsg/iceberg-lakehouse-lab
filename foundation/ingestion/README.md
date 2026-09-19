@@ -77,9 +77,34 @@ lab-ingest ga4-tables -c /path/to/config.yaml                     # which export
 lab-ingest ga4        -c /path/to/config.yaml 2026-01-01..2026-01-03   # export days -> bronze.app_events
 lab-ingest ga4        -c /path/to/config.yaml 2026-01-04 --intraday    # today's streaming table, replaced by the daily later
 lab-ingest tables     -c /path/to/config.yaml                     # bronze tables and row counts
-lab-ingest runs      -c /path/to/config.yaml                # the manifest, most recent first
-pytest                                                      # synthetic fixtures only
+lab-ingest runs       -c /path/to/config.yaml                     # the manifest, most recent first
+lab-ingest duckdb     -c /path/to/config.yaml --ui                # SQL over the bronze in the DuckDB UI (see below)
+lab-ingest anatomy app_events -c /path/to/config.yaml             # the files behind one Iceberg table, explained
+pytest                                                            # synthetic fixtures only
 ```
+
+## Looking at the bronze
+
+A directory of Parquet and Avro files is not something a person can
+judge by opening it. Two commands exist only for that — for the human
+who has to decide whether what the extractor built makes sense:
+
+- `lab-ingest duckdb` writes a DuckDB database with **one view per
+  bronze table**, each pointing at that table's current Iceberg
+  metadata file (DuckDB's `iceberg` extension reads the tables
+  directly; the pyiceberg SQL catalog is not one DuckDB understands,
+  so the views pin the metadata file and are refreshed by re-running
+  the command after a load). With `--ui` it starts the DuckDB UI
+  (`http://localhost:4213`): plain SQL, joins across bronze tables and
+  the manifest, no code. It is a local convenience — a shared catalog
+  (Glue) makes it unnecessary.
+- `lab-ingest anatomy <table>` prints the chain that makes those files
+  a table — catalog row → metadata file → current snapshot → manifest
+  list → manifests → data files, with the partition, row count, size
+  and the ingestion run that wrote each file (read from the manifest's
+  column statistics) — one line of explanation per level. Managed
+  platforms hide this chain by design; running local-first is the
+  chance to see it.
 
 ## Status
 
@@ -103,4 +128,5 @@ pytest                                                      # synthetic fixtures
   from the two local bronze tables alone, number for number.
 - `app_entities_*`: waits on the application's entities export contract
   and read-only export views.
+- `duckdb` / `anatomy`: implemented (see *Looking at the bronze*).
 - Shared AWS catalog: after the local acceptance passes.

@@ -2,3 +2,4 @@
 warehouse/
 *.local.yaml
 config.yaml
+*.duckdb
