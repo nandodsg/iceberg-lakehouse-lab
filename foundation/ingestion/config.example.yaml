@@ -31,8 +31,10 @@ sources:
 
   entities:
     kind: postgres_export
-    dsn_env: LAB_PG_DSN          # the DSN itself is never in a file
+    dsn_env: LAB_PG_DSN          # read from the environment or from a .env next to this file — never from here
     schema_name: export
-    contract: path/to/entities-export.contract.yaml
+    contract: path/to/entities-export.contract.yaml   # one schema object per export view
+    watermark_column: updated_at # its maximum per view is the snapshot's source watermark
     tables:                      # export view -> bronze table (Lab-chosen public names)
       companies: app_entities_companies
+      people: app_entities_people

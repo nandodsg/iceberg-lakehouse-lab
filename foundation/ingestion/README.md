@@ -76,6 +76,8 @@ lab-ingest abm-jsonl  -c /path/to/config.yaml runs/*.jsonl        # ABM batches 
 lab-ingest ga4-tables -c /path/to/config.yaml                     # which export days exist (daily / intraday)
 lab-ingest ga4        -c /path/to/config.yaml 2026-01-01..2026-01-03   # export days -> bronze.app_events
 lab-ingest ga4        -c /path/to/config.yaml 2026-01-04 --intraday    # today's streaming table, replaced by the daily later
+lab-ingest pg-probe   -c /path/to/config.yaml                     # what the export role can reach (and cannot)
+lab-ingest entities   -c /path/to/config.yaml                     # one full snapshot of the export views -> bronze.app_entities_*
 lab-ingest tables     -c /path/to/config.yaml                     # bronze tables and row counts
 lab-ingest runs       -c /path/to/config.yaml                     # the manifest, most recent first
 lab-ingest duckdb     -c /path/to/config.yaml --ui                # SQL over the bronze in the DuckDB UI (see below)
@@ -129,7 +131,22 @@ who has to decide whether what the extractor built makes sense:
   filtered out. Acceptance so far: the per-batch GA4 × ABM cross-check
   the previous experiment ran directly against BigQuery is reproduced
   from the two local bronze tables alone, number for number.
-- `app_entities_*`: waits on the application's entities export contract
-  and read-only export views.
+- `app_entities_*` (read-only export views): implemented. One
+  execution = one full snapshot of every configured view, all under
+  the same snapshot id (the partition); a snapshot id reloaded is
+  replaced. Full snapshots, not increments, because a physical delete
+  in the source leaves no tombstone — only the difference between two
+  snapshots shows it. Each view is read through its object in the
+  application's entities export contract (a multi-object ODCS
+  contract): the column list is the contract's, never `select *`, and
+  the view's actual columns and types are compared with the contract
+  before anything is read — a view that drifted is rejected and the
+  rejection recorded in the manifest, never adapted to. The source
+  watermark is the maximum of the application's trigger-maintained
+  `updated_at`. The database role is expected to see the export schema
+  and nothing else; `pg-probe` verifies that with a real `select`
+  attempt on every table outside it. The DSN comes from an environment
+  variable or a `.env` next to the configuration, never from a file in
+  any repository.
 - `duckdb` / `anatomy`: implemented (see *Looking at the bronze*).
 - Shared AWS catalog: after the local acceptance passes.

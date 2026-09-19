@@ -50,13 +50,29 @@ class Contract:
     quality: list[QualityRule]
     path: Path
 
+    @staticmethod
+    def object_names(path: Path) -> list[str]:
+        """The names of the contract's `schema:` objects (a contract may
+        describe several tables/views of one export)."""
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        return [o["name"] for o in raw.get("schema") or []]
+
     @classmethod
-    def load(cls, path: Path) -> "Contract":
+    def load(cls, path: Path, object_name: str | None = None) -> "Contract":
+        """One `Contract` = one schema object. A single-object contract
+        needs no name; a multi-object one is loaded per object."""
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         objects = raw.get("schema") or []
-        if len(objects) != 1:
-            raise ValueError(f"{path}: expected exactly one schema object, found {len(objects)}")
-        obj = objects[0]
+        names = [o.get("name") for o in objects]
+        if object_name is None:
+            if len(objects) != 1:
+                raise ValueError(f"{path}: contract declares {len(objects)} schema objects {names}; name one")
+            obj = objects[0]
+        else:
+            found = [o for o in objects if o.get("name") == object_name]
+            if not found:
+                raise ValueError(f"{path}: no schema object named {object_name!r} (have: {names})")
+            obj = found[0]
         fields = []
         for p in obj.get("properties", []):
             opts = p.get("logicalTypeOptions") or {}

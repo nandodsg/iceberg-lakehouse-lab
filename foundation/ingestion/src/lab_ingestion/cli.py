@@ -13,7 +13,7 @@ from pathlib import Path
 import typer
 
 from .catalog import open_catalog
-from .config import AbmJsonlSource, Config, Ga4BigQuerySource
+from .config import AbmJsonlSource, Config, Ga4BigQuerySource, PostgresExportSource
 from .manifest import MANIFEST_TABLE, append_manifest, new_run_id
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -158,6 +158,90 @@ def ga4_tables(
             f"{r['day']} {kind:<8} rows={r['rows']:<7} bytes={r['bytes']:<10} "
             f"modified={r['modified']:%Y-%m-%d %H:%M}Z{'  (streaming buffer)' if r['streaming_buffer'] else ''}"
         )
+
+
+@app.command("entities")
+def entities(
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),
+    source: str = typer.Option("entities", "--source", "-s", help="source name in the config"),
+    views: str | None = typer.Option(None, "--views", help="comma-separated subset of the configured export views"),
+    snapshot: str | None = typer.Option(None, "--snapshot", help="snapshot id to (re)load, YYYYMMDDTHHMMSSZ [default: now]"),
+):
+    """Take one full snapshot of the export views into bronze (one bronze
+    table per view, all under the same snapshot id); a view whose columns
+    or types differ from the contract is rejected, not adapted."""
+    from .sources.postgres_export import (
+        SchemaMismatch,
+        fetch_view,
+        load_view,
+        new_snapshot_ts,
+        normalize_snapshot_ts,
+        open_connection,
+        resolve_dsn,
+    )
+
+    cfg = _load(config)
+    src = _source(cfg, source, PostgresExportSource)
+    wanted = [v.strip() for v in views.split(",")] if views else list(src.tables)
+    unknown = [v for v in wanted if v not in src.tables]
+    if unknown:
+        raise typer.BadParameter(f"view(s) not in the configuration: {unknown} (have: {list(src.tables)})")
+    snapshot_ts = normalize_snapshot_ts(snapshot) if snapshot else new_snapshot_ts()
+    catalog = open_catalog(cfg.catalog)
+    run_id = new_run_id()
+    records = []
+    rejected = 0
+    with open_connection(resolve_dsn(src, config.parent)) as conn:
+        fetch = lambda view, cols: fetch_view(conn, src.schema_name, view, cols)  # noqa: E731
+        for view in wanted:
+            try:
+                rec = load_view(catalog, cfg.catalog.namespace, src, view, run_id, snapshot_ts, fetch)
+            except SchemaMismatch as e:
+                rejected += 1
+                records.append(e.record)
+                typer.echo(f"{view}: REJECTED — {'; '.join(e.problems)}", err=True)
+                continue
+            records.append(rec)
+            typer.echo(
+                f"{view} -> {rec.table_name}: read {rec.rows_read} written {rec.rows_written} "
+                f"rejected {rec.rows_rejected} watermark {rec.source_watermark}"
+            )
+    append_manifest(catalog, cfg.catalog.namespace, records)
+    typer.echo(
+        f"run {run_id}: snapshot {snapshot_ts}, {len(records) - rejected} view(s) -> {cfg.catalog.namespace}"
+        + (f", {rejected} rejected" if rejected else "")
+    )
+    if rejected:
+        raise typer.Exit(code=1)
+
+
+@app.command("pg-probe")
+def pg_probe(
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False),
+    source: str = typer.Option("entities", "--source", "-s"),
+):
+    """What the export role can reach: identity and settings, granted
+    relations, and a real SELECT attempt on every table outside the
+    export schema (all of them should be denied)."""
+    from .sources.postgres_export import open_connection, probe, resolve_dsn
+
+    cfg = _load(config)
+    src = _source(cfg, source, PostgresExportSource)
+    with open_connection(resolve_dsn(src, config.parent)) as conn:
+        info = probe(conn, src.schema_name)
+    typer.echo(f"role {info['role']}  search_path {info['search_path']}  statement_timeout {info['statement_timeout']}")
+    typer.echo(f"server {info['version'].split(',')[0]}")
+    for rel, privs in info["grants"].items():
+        typer.echo(f"grant {rel}: {', '.join(privs)}")
+    out = info["outside_export_schema"]
+    typer.echo(
+        f"outside {src.schema_name}: {out['tables']} table(s), select denied on {out['select_denied']}, "
+        f"allowed on {len(out['select_allowed'])}"
+    )
+    for rel in out["select_allowed"]:
+        typer.echo(f"  READABLE: {rel}", err=True)
+    if out["select_allowed"]:
+        raise typer.Exit(code=1)
 
 
 @app.command("duckdb")

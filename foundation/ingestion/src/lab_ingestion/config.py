@@ -78,11 +78,16 @@ class PostgresExportSource(BaseModel):
     governed by that application's own export contract (ODCS)."""
 
     kind: Literal["postgres_export"]
-    dsn_env: str = "LAB_PG_DSN"  # DSN comes from the environment, never the file
+    # The DSN is read from this environment variable, or from a `.env`
+    # file next to the configuration — never from the configuration.
+    dsn_env: str = "LAB_PG_DSN"
     schema_name: str = "export"
     contract: Path
     # export view -> bronze table name (public names, chosen by the Lab)
     tables: dict[str, str] = Field(default_factory=dict)
+    # Column whose maximum is the snapshot's source watermark (when the
+    # contract declares it for the view).
+    watermark_column: str = "updated_at"
 
 
 Source = Annotated[
