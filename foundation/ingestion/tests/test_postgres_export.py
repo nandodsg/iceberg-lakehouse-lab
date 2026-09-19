@@ -205,7 +205,7 @@ def test_resolve_dsn(tmp_path: Path, src, monkeypatch):
     monkeypatch.delenv("LAB_PG_DSN", raising=False)
     with pytest.raises(RuntimeError, match="LAB_PG_DSN"):
         resolve_dsn(src, tmp_path)
-    (tmp_path / ".env").write_text("# comment\nOTHER=1\nLAB_PG_DSN='postgresql://u:p@h/db?sslmode=require'\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("# comment\nOTHER=1\nLAB_PG_DSN='postgresql://u:p@h/db?sslmode=require'\n", encoding="utf-8-sig")  # BOM, as PowerShell writes it
     assert resolve_dsn(src, tmp_path) == "postgresql://u:p@h/db?sslmode=require"
     monkeypatch.setenv("LAB_PG_DSN", "postgresql://env")
     assert resolve_dsn(src, tmp_path) == "postgresql://env"
