@@ -28,7 +28,10 @@ from pyiceberg.table import Table
 
 def duckdb_views(catalog: Catalog, namespace: str, db_path: Path) -> list[tuple[str, str]]:
     """(view name, metadata file) for every table in the namespace, after
-    writing the views into `db_path` (created if missing)."""
+    writing the views into `db_path` (created if missing). Each table gets
+    three views: the data (`<name>`), its snapshot history
+    (`<name>__snapshots`) and the manifests/data files of the current
+    snapshot (`<name>__files`) — the anatomy, as tables."""
     import duckdb
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,9 +40,18 @@ def duckdb_views(catalog: Catalog, namespace: str, db_path: Path) -> list[tuple[
     out = []
     for ident in sorted(catalog.list_tables(namespace)):
         table = catalog.load_table(ident)
+        name = ident[-1]
         meta = table.metadata_location.replace("'", "''")
-        con.sql(f'CREATE OR REPLACE VIEW "{ident[-1]}" AS SELECT * FROM iceberg_scan(\'{meta}\')')
-        out.append((ident[-1], table.metadata_location))
+        con.sql(f'CREATE OR REPLACE VIEW "{name}" AS SELECT * FROM iceberg_scan(\'{meta}\')')
+        con.sql(
+            f'CREATE OR REPLACE VIEW "{name}__snapshots" AS '
+            f"SELECT * FROM iceberg_snapshots('{meta}') ORDER BY sequence_number DESC"
+        )
+        con.sql(
+            f'CREATE OR REPLACE VIEW "{name}__files" AS '
+            f"SELECT * FROM iceberg_metadata('{meta}') ORDER BY file_path"
+        )
+        out.append((name, table.metadata_location))
     con.close()
     return out
 

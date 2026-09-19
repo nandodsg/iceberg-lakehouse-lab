@@ -33,6 +33,9 @@ def test_duckdb_views_follow_current_metadata(catalog):
     assert views[0][1] == cat.load_table((ns, "things")).metadata_location
     con = duckdb.connect(str(db), read_only=True)
     assert con.sql("select sum(n) from things").fetchone() == (6,)
+    # the anatomy as tables: snapshot history and the current snapshot's files
+    assert con.sql("select operation from things__snapshots").fetchall() == [("append",), ("append",)]
+    assert con.sql("select record_count from things__files order by file_path").fetchall() == [(2,), (1,)]
     con.close()
 
     # a new load -> new metadata file; the view is refreshed only by re-running

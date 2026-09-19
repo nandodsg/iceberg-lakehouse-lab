@@ -174,7 +174,7 @@ def duckdb_cmd(
     catalog = open_catalog(cfg.catalog)
     db = out or Path(cfg.catalog.warehouse) / "lab.duckdb"
     for name, meta in duckdb_views(catalog, cfg.catalog.namespace, db):
-        typer.echo(f"view {name:<24} -> {meta}")
+        typer.echo(f"views {name}, {name}__snapshots, {name}__files -> {meta}")
     typer.echo(f"{db}  (re-run after every load: the views point at a fixed metadata file)")
     if ui:
         start_ui(db, announce=typer.echo)

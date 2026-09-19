@@ -96,8 +96,11 @@ who has to decide whether what the extractor built makes sense:
   so the views pin the metadata file and are refreshed by re-running
   the command after a load). With `--ui` it starts the DuckDB UI
   (`http://localhost:4213`): plain SQL, joins across bronze tables and
-  the manifest, no code. It is a local convenience — a shared catalog
-  (Glue) makes it unnecessary.
+  the manifest, no code. Each table also gets `<name>__snapshots` (its
+  commit history) and `<name>__files` (the manifests and data files of
+  the current snapshot) — the anatomy below, as tables you can query.
+  It is a local convenience — a shared catalog (Glue) makes it
+  unnecessary.
 - `lab-ingest anatomy <table>` prints the chain that makes those files
   a table — catalog row → metadata file → current snapshot → manifest
   list → manifests → data files, with the partition, row count, size
