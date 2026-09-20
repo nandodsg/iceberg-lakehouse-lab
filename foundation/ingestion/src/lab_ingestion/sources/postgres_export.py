@@ -268,13 +268,12 @@ def load_view(
 
     table = ensure_table(catalog, namespace, table_name, schema, partition_by=["snapshot_ts"])
     part = EqualTo("snapshot_ts", snapshot_ts)
-    if good:
-        arrow = pa.Table.from_pylist(good, schema=schema)
-        if table.current_snapshot() is None:
-            table.append(arrow)
-        else:
-            table.overwrite(arrow, overwrite_filter=part)  # idempotent per snapshot id
-    elif table.current_snapshot() is not None:
+    loaded = table.current_snapshot() is not None and table.scan(row_filter=part, selected_fields=("snapshot_ts",)).to_arrow().num_rows > 0
+    if good and loaded:
+        table.overwrite(pa.Table.from_pylist(good, schema=schema), overwrite_filter=part)  # idempotent per snapshot id
+    elif good:
+        table.append(pa.Table.from_pylist(good, schema=schema))
+    elif loaded:
         table.delete(part)  # an empty view still replaces the snapshot's partition
     rec.rows_written = len(good)
     append_rejected(catalog, namespace, table_name, rejected)
