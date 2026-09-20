@@ -323,6 +323,13 @@ The Lab intentionally progresses through:
 6.  interoperability proof;
 7.  CI/CD and portfolio evidence.
 
+In practice step 3 was built and proven before step 2 existed: the
+batch extractor runs against a local Iceberg catalog first (zero cloud
+spend while the pipeline is unproven) and moves to the shared AWS
+foundation by configuration, not by code change. The order above still
+describes the target platform; local-first is how each step earns its
+cloud cost.
+
 The ABM/data generator is introduced as the source of realistic
 synthetic behavioral data without becoming a parallel engineering
 project.

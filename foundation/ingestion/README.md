@@ -111,42 +111,86 @@ who has to decide whether what the extractor built makes sense:
   platforms hide this chain by design; running local-first is the
   chance to see it.
 
-## Status
+## Status — what the local acceptance proved
 
-- `abm_decision_steps`: implemented; contract v1.0.0 validated against
-  the full output of the first experiment (16 batch files, 23,847
-  decision-steps, 303 agents) and loaded locally with all contract checks passing on
-  every complete batch and failing — as designed — on the two aborted
-  ones.
-- `app_events` (GA4 BigQuery Export): implemented. One export day = one
-  partition; the daily table is the truth, the intraday (streaming)
-  table loads only under `--intraday` into the same partition, flagged,
-  and is replaced by the daily one (the reverse is refused). The export's
+All three sources are implemented and loaded against the local catalog.
+This is the state the shared AWS catalog inherits unchanged.
+
+- `abm_decision_steps` — contract v1.0.0 validated against the full
+  output of the first experiment (16 batch files, 23,847 decision-steps,
+  303 agents) and loaded with every contract check passing on every
+  complete batch and failing — as designed — on the two aborted ones.
+- `app_events` (GA4 BigQuery Export) — one export day = one partition;
+  the daily table is the truth, the intraday (streaming) table loads
+  only under `--intraday` into the same partition, flagged, and is
+  replaced by the daily one (the reverse is refused). The export's
   nested structure is kept as Iceberg list/struct columns; `event_ts`
   and the configured user properties are promoted to top-level columns.
   A population policy runs before the write and is counted in the
   manifest: rows tagged with an allowed population are kept, untagged
   rows only when their user id is already known from another bronze
   source (a login fires before the tag exists), everything else is
-  filtered out. Acceptance so far: the per-batch GA4 × ABM cross-check
-  the previous experiment ran directly against BigQuery is reproduced
-  from the two local bronze tables alone, number for number.
-- `app_entities_*` (read-only export views): implemented. One
-  execution = one full snapshot of every configured view, all under
-  the same snapshot id (the partition); a snapshot id reloaded is
-  replaced. Full snapshots, not increments, because a physical delete
-  in the source leaves no tombstone — only the difference between two
-  snapshots shows it. Each view is read through its object in the
-  application's entities export contract (a multi-object ODCS
-  contract): the column list is the contract's, never `select *`, and
-  the view's actual columns and types are compared with the contract
-  before anything is read — a view that drifted is rejected and the
-  rejection recorded in the manifest, never adapted to. The source
-  watermark is the maximum of the application's trigger-maintained
-  `updated_at`. The database role is expected to see the export schema
-  and nothing else; `pg-probe` verifies that with a real `select`
-  attempt on every table outside it. The DSN comes from an environment
-  variable or a `.env` next to the configuration, never from a file in
-  any repository.
-- `duckdb` / `anatomy`: implemented (see *Looking at the bronze*).
-- Shared AWS catalog: after the local acceptance passes.
+  filtered out. **Acceptance**: the per-batch GA4 × ABM cross-check that
+  the first experiment ran directly against BigQuery is reproduced from
+  the two local bronze tables alone, number for number, for every batch
+  with a reference. The one difference — a single login event in one
+  batch — is the consolidated daily table being more complete than the
+  intraday snapshot the experiment had read at the time; that is exactly
+  why the daily table is the truth here.
+- `app_entities_*` (read-only export views) — one execution = one full
+  snapshot of every configured view, all under the same snapshot id
+  (the partition); a snapshot id reloaded is replaced. Full snapshots,
+  not increments, because a physical delete in the source leaves no
+  tombstone — only the difference between two snapshots shows it. Each
+  view is read through its object in the application's entities export
+  contract (a multi-object ODCS contract): the column list is the
+  contract's, never `select *`, and the view's actual columns and types
+  are compared with the contract before anything is read — a view that
+  drifted is rejected and the rejection recorded in the manifest, never
+  adapted to. The source watermark is the latest row-update timestamp
+  the export views expose. The database role is expected to see the
+  export schema and nothing else; `pg-probe` verifies that with a real
+  `select` attempt on every table outside it. The DSN comes from an
+  environment variable or a `.env` next to the configuration, never
+  from a file in any repository. **Acceptance**: a full snapshot loaded
+  with every view matching its contract object column for column and
+  nothing rejected; where state exists, the relationship the silver join
+  needs holds — one creation event in `app_events` = one entity row
+  created by that user.
+- `duckdb` / `anatomy` — implemented (see *Looking at the bronze*).
+
+### A finding, not a failure: the first experiment has no entity leg
+
+The three-way join — events × decision-steps × entities — cannot be
+closed for the first experiment's batches, and never will be. The
+harness discards each batch's synthetic accounts when the batch ends
+(the "one account per run, never reused" policy — see
+[abm/experiments/README.md](../../abm/experiments/README.md)), the
+source removes them physically, and no snapshot of the export views
+existed at the time. The extractor reports exactly what the source
+holds — none of those agents — and that is the correct answer, not a
+gap in the pipeline. Two consequences:
+
+- **Operating rule from now on**: `lab-ingest entities` runs *before* a
+  batch's accounts are discarded, and again after. The difference
+  between the two snapshots is the deletion, demonstrated with data
+  rather than assumed — the property the snapshot design above exists
+  for.
+- The first dataset with all three legs will be the next experiment
+  run, written directly into the shared catalog. The first experiment's
+  batches remain what they are — the evidence for its hypothesis and for
+  the events × decision-steps cross-check above — with the entity leg
+  absent by construction.
+
+### Next
+
+- [`foundation/infra/`](../infra/) (S3 + Glue + cost guardrails,
+  OpenTofu): a change of `catalog:` in the configuration, then the same
+  loads and the same cross-check against the shared catalog.
+- Deferred, each with its trigger: validating `app_events` against the
+  application's analytics export contract the way entities already are
+  (once that contract is reachable from the extractor's configuration);
+  a dedicated read-only service account for BigQuery in place of
+  developer credentials (when loads leave the developer's machine); a
+  small explorer page on top of the DuckDB views, only if the managed
+  consoles leave a gap the *Looking at the bronze* commands don't cover.

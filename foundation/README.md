@@ -7,7 +7,9 @@ tracks, produced once, read by both. See
 - [`infra/`](infra/) — S3, Glue Data Catalog, IAM, budget/tagging guardrails
   (OpenTofu).
 - [`ingestion/`](ingestion/) — batch extraction from Matriz/Supabase and
-  GA4/BigQuery into S3/Iceberg bronze tables.
+  GA4/BigQuery into S3/Iceberg bronze tables. Implemented and proven
+  local-first (a local Iceberg catalog, zero cloud); moving to the
+  shared S3/Glue catalog is a configuration switch once `infra/` exists.
 
 Both comparison tracks (`tracks/databricks/`, `tracks/snowflake/`) read the
 same Iceberg bronze tables this produces — nothing here is specific to
